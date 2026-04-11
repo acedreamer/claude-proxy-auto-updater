@@ -10,6 +10,7 @@
 # Cache files
 *.cache
 model-cache.json
+model-candidates.json
 
 # Backup files
 *.backup

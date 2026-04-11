@@ -40,9 +40,22 @@ This tool exists purely as a bridge between two phenomenal open-source projects:
 
 ## 🚀 Usage Guide
 
-1. Download **`update-models.ps1`** and **`fcm-oneshot.mjs`** from this repository.
+### Platform Support
+
+| Platform | Script | Status |
+|----------|--------|--------|
+| Windows | `update-models.ps1` | ✅ Available |
+| Linux | `update-models.sh` | ✅ Available |
+| macOS | `update-models.sh` | ✅ Available |
+
+### Setup
+
+1. Download **`update-models.ps1`** (Windows) or **`update-models.sh`** (Linux/macOS) and **`fcm-oneshot.mjs`** from this repository.
 2. Place both files into your `free-claude-code` root folder (where your `.env` is).
-3. Update your `start_server.bat` to run the script:
+
+### Windows (PowerShell)
+
+Update your `start_server.bat` to run the script:
 
 ```bat
 @echo off
@@ -50,6 +63,36 @@ echo Running model update script...
 powershell.exe -ExecutionPolicy Bypass -File "%~dp0update-models.ps1"
 uv run uvicorn server:app --host 0.0.0.0 --port 8082
 pause
+```
+
+### Linux / macOS (Bash)
+
+Make the script executable and run it:
+
+```bash
+chmod +x update-models.sh
+./update-models.sh
+```
+
+Or integrate into your startup script:
+
+```bash
+#!/bin/bash
+echo "Running model update script..."
+./update-models.sh
+uv run uvicorn server:app --host 0.0.0.0 --port 8082
+```
+
+### Both scripts support `--dry-run` flag
+
+Preview changes without modifying `.env`:
+
+```powershell
+# Windows
+.\update-models.ps1 -DryRun
+
+# Linux/macOS
+./update-models.sh --dry-run
 ```
 
 ---

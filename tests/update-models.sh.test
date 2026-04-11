@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#
+# Tests for update-models.sh
+# Run with: bash tests/update-models.sh.test
+
+set -euo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TEST_DIR="$SCRIPT_DIR"
+readonly PROJECT_DIR="$(dirname "$TEST_DIR")"
+
+# Colors
+readonly GREEN='\033[0;32m'
+readonly RED='\033[0;31m'
+readonly NC='\033[0m'
+
+passed=0
+failed=0
+
+assert() {
+  local expected="$1"
+  local result="$2"
+  local test_name="$3"
+
+  if [[ "$result" == "$expected" ]]; then
+    echo -e "${GREEN}[PASS]${NC} $test_name"
+    passed=$((passed + 1))
+  else
+    echo -e "${RED}[FAIL]${NC} $test_name"
+    echo "  Expected: '$expected'"
+    echo "  Got: '$result'"
+    failed=$((failed + 1))
+  fi
+}
+
+# Source the script to test individual functions
+source "$PROJECT_DIR/update-models.sh" 2>/dev/null || true
+
+echo "=========================================="
+echo "Running update-models.sh tests"
+echo "=========================================="
+echo ""
+
+# Test get_model_prefix functions directly
+echo "Testing get_model_prefix..."
+
+result=$(get_model_prefix "nvidia" "deepseek/test")
+assert "nvidia_nim/deepseek/test" "$result" "nvidia prefix"
+
+result=$(get_model_prefix "openrouter" "r1")
+assert "open_router/r1" "$result" "openrouter prefix"
+
+result=$(get_model_prefix "other" "x")
+assert "other/x" "$result" "unknown prefix"
+
+# Test get_cap_key
+result=$(get_cap_key "nvidia" "deepseek-v3")
+assert "nvidia/deepseek-v3" "$result" "get_cap_key"
+
+echo ""
+echo "=========================================="
+echo "Results: $passed passed, $failed failed"
+echo "=========================================="
+
+[[ $failed -eq 0 ]] && exit 0 || exit 1
