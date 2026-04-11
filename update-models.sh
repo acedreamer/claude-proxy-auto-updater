@@ -251,6 +251,58 @@ get_cap_key() {
     echo "$1/$2"
 }
 
+# Calculate score with detailed breakdown
+# Outputs: score|swe_contrib|stab_contrib|lat_contrib|nim_contrib|avgms
+calculate_score_breakdown() {
+    local idx="$1"
+    local weight_name="$2"
+
+    local swe="${MODEL_DATA_SWE[$idx]:-0}"
+    local stability="${MODEL_DATA_STABILITY[$idx]:-30}"
+    local avgms="${MODEL_DATA_AVGMS[$idx]:-9999}"
+    local provider="${MODEL_DATA_PROVIDER[$idx]:-unknown}"
+
+    local swe_w stab_w lat_w nim_w lat_target lat_penalty
+    case "$weight_name" in
+        Opus)
+            swe_w=0.50; stab_w=0.25; lat_w=0.05; nim_w=1.5
+            lat_target=800; lat_penalty=0.02
+            ;;
+        Sonnet)
+            swe_w=0.35; stab_w=0.25; lat_w=0.20; nim_w=1.0
+            lat_target=400; lat_penalty=0.05
+            ;;
+        Haiku)
+            swe_w=0.10; stab_w=0.20; lat_w=0.60; nim_w=0.5
+            lat_target=200; lat_penalty=0.12
+            ;;
+        Fallback)
+            swe_w=0.30; stab_w=0.40; lat_w=0.15; nim_w=1.0
+            lat_target=500; lat_penalty=0.04
+            ;;
+    esac
+
+    local lat_score
+    lat_score=$(awk "BEGIN {
+        val = 100 - (($avgms - $lat_target) * $lat_penalty)
+        if (val < 0) val = 0
+        if (val > 100) val = 100
+        print val
+    }")
+
+    local nim_bonus=0
+    [[ "$provider" == "nvidia" ]] && nim_bonus=8
+
+    local swe_contrib stab_contrib lat_contrib nim_contrib total
+    swe_contrib=$(awk "BEGIN { printf \"%.1f\", $swe * $swe_w }")
+    stab_contrib=$(awk "BEGIN { printf \"%.1f\", $stability * $stab_w }")
+    lat_contrib=$(awk "BEGIN { printf \"%.1f\", $lat_score * $lat_w }")
+    nim_contrib=$(awk "BEGIN { printf \"%.1f\", $nim_bonus * $nim_w }")
+    total=$(awk "BEGIN { printf \"%.1f\", $swe_contrib + $stab_contrib + $lat_contrib + $nim_contrib }")
+
+    echo "$total|$swe_contrib|$stab_contrib|$lat_contrib|$nim_contrib|$avgms"
+}
+
 tool_call_ok() {
     local provider="$1" model_id="$2"
     local cap_key
@@ -309,6 +361,21 @@ declare -A SLOT_WINNER
 declare -A SLOT_SCORE
 declare -A SLOT_RUNNERUP
 declare -A SLOT_RUNNERUP_SCORE
+declare -A SLOT_RUNNERUP_DELTA
+
+declare -A SLOT_SWE
+
+declare -A SLOT_STAB
+declare -A SLOT_LAT
+declare -A SLOT_NIM
+declare -A SLOT_VERDICT
+declare -A SLOT_AVGMS
+
+declare -a ALL_OPUS_SCORES
+
+declare -a ALL_SONNET_SCORES
+declare -a ALL_HAIKU_SCORES
+declare -a ALL_FALLBACK_SCORES
 
 assign_slots() {
     local model_count="$1"
