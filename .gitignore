@@ -1,0 +1,20 @@
+# Environment files
+.env
+.env.backup
+.env.*
+!env.example
+
+# Logs
+*.log
+
+# Cache files
+*.cache
+model-cache.json
+
+# Backup files
+*.backup
+*.bak
+
+# Temp files
+*.tmp
+*~
