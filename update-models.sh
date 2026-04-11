@@ -159,6 +159,7 @@ parse_model_json() {
     MODEL_DATA_AVGMS=()
     MODEL_DATA_VERDICT=()
     MODEL_DATA_STATUS=()
+    MODEL_DATA_TOOLCALLOK=()
     MODEL_DATA_PROVIDER=()
     MODEL_DATA_MODELID=()
     MODEL_DATA_TIER=()
@@ -174,6 +175,15 @@ parse_model_json() {
         MODEL_DATA_STABILITY[$idx]="${BASH_REMATCH[4]}"
         MODEL_DATA_AVGMS[$idx]="${BASH_REMATCH[5]}"
         MODEL_DATA_VERDICT[$idx]="${BASH_REMATCH[6]}"
+
+        # Try to extract toolCallOk from JSON output (R-403: auto-detected)
+        local full_obj_match
+        full_obj_match="provider\":\"${BASH_REMATCH[1]}\",\"modelId\":\"${BASH_REMATCH[2]}\","
+        if [[ "$temp_json" =~ ${full_obj_match}[^,}]*\"toolCallOk\"[[:space:]]*\:[[:space:]]*(true|false|null) ]]; then
+            MODEL_DATA_TOOLCALLOK[$idx]="${BASH_REMATCH[1]}"
+        else
+            MODEL_DATA_TOOLCALLOK[$idx]="unknown"
+        fi
 
         # Try to extract tier and status
         local obj_match="provider\":\"${BASH_REMATCH[1]}\",\"modelId\":\"${BASH_REMATCH[2]}\","
@@ -263,8 +273,20 @@ calculate_score_breakdown() {
     echo "$total|$swe_contrib|$stab_contrib|$lat_contrib|$nim_contrib|$avgms"
 }
 
+# R-404: Static registry as override/hint layer - auto-detected values take precedence
 tool_call_ok() {
     local provider="$1" model_id="$2"
+    local idx="$3"
+
+    # R-403: Check auto-detected value first if we have the model index
+    if [[ -n "$idx" && -n "${MODEL_DATA_TOOLCALLOK[$idx]:-}" ]]; then
+        local detected="${MODEL_DATA_TOOLCALLOK[$idx]}"
+        [[ "$detected" == "true" ]] && return 0
+        [[ "$detected" == "false" ]] && return 1
+        # "unknown" falls through to registry lookup
+    fi
+
+    # R-405: Fall back to static registry
     local cap_key
     cap_key=$(get_cap_key "$provider" "$model_id")
     [[ "${MODEL_CAPS_TOOLCALLOK[$cap_key]:-false}" == "true" ]]
@@ -359,7 +381,7 @@ assign_slots() {
         local verdict="${MODEL_DATA_VERDICT[$idx]}"
 
         [[ "$verdict" != "Perfect" && "$verdict" != "Normal" ]] && continue
-        tool_call_ok "$provider" "$modelid" || continue
+        tool_call_ok "$provider" "$modelid" "$idx" || continue
         is_thinking_model "$provider" "$modelid" && continue
 
         local score="${opus_scores[$idx]}"
@@ -382,7 +404,7 @@ assign_slots() {
             local idx="${model_indices[$i]}"
             local provider="${MODEL_DATA_PROVIDER[$idx]}"
             local modelid="${MODEL_DATA_MODELID[$idx]}"
-            tool_call_ok "$provider" "$modelid" || continue
+            tool_call_ok "$provider" "$modelid" "$idx" || continue
             is_thinking_model "$provider" "$modelid" && continue
             local score="${opus_scores[$idx]}"
             local score_int="${score%%.*}"
@@ -413,7 +435,7 @@ assign_slots() {
         local modelid="${MODEL_DATA_MODELID[$idx]}"
         local verdict="${MODEL_DATA_VERDICT[$idx]}"
         [[ "$verdict" != "Perfect" && "$verdict" != "Normal" ]] && continue
-        tool_call_ok "$provider" "$modelid" || continue
+        tool_call_ok "$provider" "$modelid" "$idx" || continue
         local score="${sonnet_scores[$idx]}"
         local score_int="${score%%.*}"
 
@@ -489,7 +511,7 @@ assign_slots() {
         local idx="${model_indices[$i]}"
         local provider="${MODEL_DATA_PROVIDER[$idx]}"
         local modelid="${MODEL_DATA_MODELID[$idx]}"
-        tool_call_ok "$provider" "$modelid" || continue
+        tool_call_ok "$provider" "$modelid" "$idx" || continue
         local stability="${MODEL_DATA_STABILITY[$idx]:-0}"
         local score="${fallback_scores[$idx]}"
         local score_int="${score%%.*}"
@@ -844,6 +866,11 @@ main() {
     fi
 
     log_info "Processing $model_count models..."
+
+    # Check for degraded mode from fcm-oneshot output
+    if echo "$json_output" | grep -q '"degraded":true'; then
+        log_warn "Running in degraded mode. Install free-coding-models for full scoring."
+    fi
 
     # Assign slots
     assign_slots "$model_count"

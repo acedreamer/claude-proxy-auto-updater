@@ -1,18 +1,17 @@
 /**
  * fcm-oneshot.mjs
- * 
+ *
  * Uses free-coding-models internals directly to run ONE ping cycle,
  * output rich JSON (verdict, stability, p95, jitter, uptime), then exit.
- * 
- * This replaces the PowerShell runspace ping logic in update-models.ps1
- * with real free-coding-models data including verdicts and stability scores.
- * 
+ *
+ * M3: Now includes degraded mode (direct HTTP fallback) and tool-call auto-detection.
+ *
  * Usage:
- *   node fcm-oneshot.mjs [--providers nim,openrouter] [--tier S,A] [--timeout 15000]
+ * node fcm-oneshot.mjs [--providers nim,openrouter] [--tier S,A] [--timeout 15000]
  */
 
 import { createRequire } from 'module'
-import { fileURLToPath, pathToFileURL } from 'url'
+import { fileURLToFilePath, pathToFileURL } from 'url'
 import path from 'path'
 import fs from 'fs'
 import { execSync } from 'child_process'
@@ -20,6 +19,8 @@ import { execSync } from 'child_process'
 // -- Locate free-coding-models package --
 const require = createRequire(import.meta.url)
 let FCM_ROOT
+let DEGRADED_MODE = false
+
 try {
   // 1. Try local resolution
   FCM_ROOT = path.dirname(require.resolve('free-coding-models/package.json'))
@@ -35,105 +36,416 @@ try {
       throw new Error('Not found globally')
     }
   } catch (err) {
-    process.stderr.write('[fcm-oneshot] ERROR: free-coding-models not found locally or globally.\n')
-    process.stderr.write('              Run: npm install free-coding-models\n')
-    process.exit(1)
+    // 3. Fall back to degraded mode with direct HTTP ping
+    DEGRADED_MODE = true
+    process.stderr.write('[fcm-oneshot] DEGRADED MODE: free-coding-models not found.\n')
+    process.stderr.write(' Install for full features: npm install -g free-coding-models\n')
+    process.stderr.write(' Continuing with latency-only HTTP pings...\n\n')
   }
 }
 
-// -- Dynamic imports from the package --
-const fcmUrl = pathToFileURL(FCM_ROOT).href
-const { MODELS, sources } = await import(`${fcmUrl}/sources.js`)
-const { ping }            = await import(`${fcmUrl}/src/ping.js`)
-const {
-  getAvg, getVerdict, getUptime, getP95, getJitter, getStabilityScore
-} = await import(`${fcmUrl}/src/utils.js`)
+// -- CLI ARGS (needed in degraded mode too) --
+const args = process.argv.slice(2)
+const getArg = (flag) => {
+  const i = args.indexOf(flag)
+  return i !== -1 ? args[i + 1] : null
+}
 
-// ============================================================
-// CLI ARGS
-// ============================================================
-const args        = process.argv.slice(2)
-const getArg      = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : null }
-
-const TIMEOUT_MS  = parseInt(getArg('--timeout') || '15000', 10)
+const TIMEOUT_MS = parseInt(getArg('--timeout') || '15000', 10)
 const filterProvs = (getArg('--providers') || '').split(',').filter(Boolean)
-const filterTiers = (getArg('--tier')      || '').split(',').filter(Boolean)
-const MAX_CONCUR  = parseInt(getArg('--concurrency') || '12', 10)
+const filterTiers = (getArg('--tier') || '').split(',').filter(Boolean)
+const MAX_CONCUR = parseInt(getArg('--concurrency') || '12', 10)
+const ENABLE_TOOL_TEST = !getArg('--no-tool-test') // R-401: Tool-call probe flag
 
 // ============================================================
 // KEY RESOLUTION
 // ============================================================
 const KEY_MAP = {
-  nvidia:      process.env.NVIDIA_API_KEY  || process.env.NVIDIA_NIM_API_KEY,
-  openrouter:  process.env.OPENROUTER_API_KEY,
+  nvidia: process.env.NVIDIA_API_KEY || process.env.NVIDIA_NIM_API_KEY,
+  openrouter: process.env.OPENROUTER_API_KEY,
 }
 
-// ============================================================
-// MODEL FILTER
-// ============================================================
-const enabledProviders = new Set(
-  Object.entries(KEY_MAP)
-    .filter(([k, v]) => v && (filterProvs.length === 0 || filterProvs.includes(k)))
-    .map(([k]) => k)
-)
+// Minimal model registry for degraded mode (R-501-R-504)
+const DEGRADED_MODELS = [
+  // NVIDIA NIM
+  ['moonshotai/kimi-k2.5', 'Kimi K2.5', 'S', '70.9', '128k', 'nvidia', 'nvidia_nim/moonshotai/kimi-k2.5'],
+  ['moonshotai/kimi-k2-thinking', 'Kimi K2 Thinking', 'A', '68.5', '128k', 'nvidia', 'nvidia_nim/moonshotai/kimi-k2-thinking'],
+  ['z-ai/glm4.7', 'GLM-4.7', 'S', '68.4', '128k', 'nvidia', 'nvidia_nim/z-ai/glm4.7'],
+  ['deepseek-ai/deepseek-v3.2', 'DeepSeek V3.2', 'S', '68.3', '128k', 'nvidia', 'nvidia_nim/deepseek-ai/deepseek-v3.2'],
+  ['deepseek-ai/deepseek-v3-0324', 'DeepSeek V3-0324', 'S', '67.9', '128k', 'nvidia', 'nvidia_nim/deepseek-ai/deepseek-v3-0324'],
+  ['minimaxai/minimax-m2.5', 'MiniMax M2.5', 'A', '65.0', '128k', 'nvidia', 'nvidia_nim/minimaxai/minimax-m2.5'],
+  ['meta/llama-3.3-70b-instruct', 'Llama 3.3 70B', 'A', '62.5', '128k', 'nvidia', 'nvidia_nim/meta/llama-3.3-70b-instruct'],
+  ['meta/llama-3.1-405b-instruct', 'Llama 3.1 405B', 'S', '68.2', '128k', 'nvidia', 'nvidia_nim/meta/llama-3.1-405b-instruct'],
+  // OpenRouter
+  ['deepseek/deepseek-r1:free', 'DeepSeek R1', 'S', '68.5', '128k', 'openrouter', 'open_router/deepseek/deepseek-r1:free'],
+  ['deepseek/deepseek-r1-0528:free', 'DeepSeek R1-0528', 'S', '68.7', '128k', 'openrouter', 'open_router/deepseek/deepseek-r1-0528:free'],
+  ['qwen/qwen3.6-plus:free', 'Qwen 3.6 Plus', 'A', '65.0', '128k', 'openrouter', 'open_router/qwen/qwen3.6-plus:free'],
+]
 
-const candidates = MODELS.filter(([modelId, label, tier, sweScore, ctx, providerKey]) => {
-  if (!enabledProviders.has(providerKey)) return false
-  if (filterTiers.length > 0 && !filterTiers.includes(tier)) return false
-  return true
-}).map(([modelId, label, tier, sweScore, ctx, providerKey]) => ({
-  modelId, label, tier, sweScore, ctx, providerKey,
-  pings: [], status: 'pending',
-}))
-
-if (candidates.length === 0) {
-  process.stdout.write('[]\n')
-  process.exit(1)
-}
-
-// ============================================================
-// PING
-// ============================================================
-async function pingModel(model) {
-  const apiKey = KEY_MAP[model.providerKey]
-  const url    = sources[model.providerKey].url
-  try {
-    const result = await ping(apiKey, model.modelId, model.providerKey, url)
-    model.pings.push({ ms: result.ms === 'TIMEOUT' ? TIMEOUT_MS : result.ms, code: result.code })
-    model.status = result.code === '200' ? 'up' : 'down'
-  } catch (err) {
-    model.status = 'down'
-  }
-}
-
-async function runWithConcurrency(tasks, limit) {
-  const queue = [...tasks]; const active = []; const results = []
-  while (queue.length > 0 || active.length > 0) {
-    while (active.length < limit && queue.length > 0) {
-      const task = queue.shift()
-      const p = pingModel(task).then(() => active.splice(active.indexOf(p), 1))
-      active.push(p)
+// Tool-call detection: minimal test request (R-401, R-402)
+const TOOL_TEST_TOOL = {
+  type: 'function',
+  function: {
+    name: 'get_weather',
+    description: 'Get current weather for a location',
+    parameters: {
+      type: 'object',
+      properties: {
+        location: { type: 'string', description: 'City name' }
+      },
+      required: ['location']
     }
-    if (active.length > 0) await Promise.race(active)
   }
 }
 
-await runWithConcurrency(candidates, MAX_CONCUR)
+// ============================================================
+// DEGRADED MODE: Direct HTTP PING (R-501-R-504)
+// ============================================================
 
-const output = candidates.map(m => {
-  const stability = getStabilityScore(m)
-  const sweNum = parseFloat((m.sweScore || '0').replace('%', '')) || 0
-  return {
-    modelId: m.modelId,
-    provider: m.providerKey,
-    tier: m.tier,
-    swe: sweNum,
-    status: m.status,
-    verdict: getVerdict(m),
-    avgMs: getAvg(m),
-    stability: Number.isFinite(stability) ? stability : null,
+async function degradedPing(model, signal) {
+  const start = performance.now()
+  try {
+    const provider = model.providerKey
+    const apiKey = KEY_MAP[provider]
+
+    if (!apiKey) {
+      return { ms: -1, code: 'NO_KEY', latencyOnly: true }
+    }
+
+    let url, body, headers
+
+    if (provider === 'nvidia') {
+      url = 'https://integrate.api.nvidia.com/v1/chat/completions'
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      }
+      body = JSON.stringify({
+        model: model.modelId,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1
+      })
+    } else if (provider === 'openrouter') {
+      url = 'https://openrouter.ai/api/v1/chat/completions'
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://localhost',
+        'X-Title': 'Claude Proxy Auto-Updater'
+      }
+      body = JSON.stringify({
+        model: model.modelId,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1
+      })
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body,
+      signal
+    })
+
+    const end = performance.now()
+    const ms = Math.round(end - start)
+    const code = response.status.toString()
+
+    return { ms, code, latencyOnly: true }
+  } catch (err) {
+    return { ms: -1, code: 'ERR', latencyOnly: true, error: err.name }
   }
-})
+}
 
-process.stdout.write(JSON.stringify(output, null, 2) + '\n')
-process.exit(0)
+// Tool-call probe (R-401-R-406)
+async function toolCallProbe(model, signal) {
+  const start = performance.now()
+  try {
+    const provider = model.providerKey
+    const apiKey = KEY_MAP[provider]
+
+    if (!apiKey) return { toolCallOk: false, error: 'No API key' }
+
+    let url, headers, body
+
+    if (provider === 'nvidia') {
+      url = 'https://integrate.api.nvidia.com/v1/chat/completions'
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      }
+      body = JSON.stringify({
+        model: model.modelId,
+        messages: [{ role: 'user', content: 'What is the weather in Paris?' }],
+        tools: [TOOL_TEST_TOOL],
+        tool_choice: 'auto',
+        max_tokens: 100
+      })
+    } else if (provider === 'openrouter') {
+      url = 'https://openrouter.ai/api/v1/chat/completions'
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://localhost',
+        'X-Title': 'Claude Proxy Auto-Updater'
+      }
+      body = JSON.stringify({
+        model: model.modelId,
+        messages: [{ role: 'user', content: 'What is the weather in Paris?' }],
+        tools: [TOOL_TEST_TOOL],
+        tool_choice: 'auto',
+        max_tokens: 100
+      })
+    } else {
+      return { toolCallOk: false, error: 'Unknown provider' }
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body,
+      signal
+    })
+
+    const end = performance.now()
+    const probeMs = Math.round(end - start)
+
+    // R-406: Must complete within 1 second total
+    if (probeMs > 1000) {
+      return { toolCallOk: false, timedOut: true }
+    }
+
+    const data = await response.json()
+
+    // R-402: Check for valid tool_use in response
+    let hasToolUse = false
+    if (data.choices && data.choices[0]?.message) {
+      const msg = data.choices[0].message
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        hasToolUse = true
+      }
+      // OpenRouter uses different format
+      if (msg.content && typeof msg.content === 'string' && msg.content.includes('tool')) {
+        // Conservative check - actual tool_use detection varies by API
+      }
+    }
+
+    return { toolCallOk: hasToolUse, probeMs }
+  } catch (err) {
+    // R-405: Fall back on error/timeout
+    if (signal.aborted) {
+      return { toolCallOk: false, timedOut: true }
+    }
+    return { toolCallOk: false, error: err.name }
+  }
+}
+
+// ============================================================
+// MAIN EXECUTION
+// ============================================================
+
+async function main() {
+  let candidates, ping, getStabilityScore, getVerdict, getAvg
+
+  const enabledProviders = new Set(
+    Object.entries(KEY_MAP)
+      .filter(([k, v]) => v && (filterProvs.length === 0 || filterProvs.includes(k)))
+      .map(([k]) => k)
+  )
+
+  // Build candidates list
+  if (DEGRADED_MODE) {
+    // R-502: In degraded mode, use hardcoded model list
+    candidates = DEGRADED_MODELS
+      .filter(([modelId, label, tier, swe, ctx, providerKey, prefix]) => {
+        if (!enabledProviders.has(providerKey)) return false
+        if (filterTiers.length > 0 && !filterTiers.includes(tier)) return false
+        return true
+      })
+      .map(([modelId, label, tier, sweScore, ctx, providerKey, prefix]) => ({
+        modelId,
+        label,
+        tier,
+        sweScore,
+        providerKey,
+        prefix,
+        pings: [],
+        status: 'pending',
+        toolCallOk: null // Will be determined by probe
+      }))
+  } else {
+    // Full mode with free-coding-models
+    const fcmUrl = pathToFileURL(FCM_ROOT).href
+    const { MODELS, sources } = await import(`${fcmUrl}/sources.js`)
+    const fcmPing = await import(`${fcmUrl}/src/ping.js`)
+    const fcmUtils = await import(`${fcmUrl}/src/utils.js`)
+
+    ping = fcmPing.ping
+    getStabilityScore = fcmUtils.getStabilityScore
+    getVerdict = fcmUtils.getVerdict
+    getAvg = fcmUtils.getAvg
+
+    candidates = MODELS.filter(([modelId, label, tier, sweScore, ctx, providerKey]) => {
+      if (!enabledProviders.has(providerKey)) return false
+      if (filterTiers.length > 0 && !filterTiers.includes(tier)) return false
+      return true
+    }).map(([modelId, label, tier, sweScore, ctx, providerKey]) => ({
+      modelId,
+      label,
+      tier,
+      sweScore,
+      providerKey,
+      pings: [],
+      status: 'pending',
+      toolCallOk: false
+    }))
+  }
+
+  if (candidates.length === 0) {
+    process.stdout.write('[]\n')
+    process.exit(1)
+  }
+
+  // ============================================================
+  // PING WITH CONCURRENCY
+  // ============================================================
+
+  async function pingModel(model) {
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
+
+    try {
+      let result
+      let toolResult = { toolCallOk: false }
+
+      if (DEGRADED_MODE) {
+        // R-501: Direct HTTP ping when fcm not found
+        result = await degradedPing(model, ctrl.signal)
+
+        // R-401, R-406: Tool-call probe with 1 second budget
+        if (ENABLE_TOOL_TEST) {
+          const toolCtrl = new AbortController()
+          const toolTimeout = setTimeout(() => toolCtrl.abort(), 1000)
+          toolResult = await toolCallProbe(model, toolCtrl.signal)
+          clearTimeout(toolTimeout)
+        }
+      } else {
+        // Full free-coding-models ping
+        const apiKey = KEY_MAP[model.providerKey]
+        const { sources } = await import(`${pathToFileURL(FCM_ROOT).href}/sources.js`)
+        const url = sources[model.providerKey].url
+        result = await ping(apiKey, model.modelId, model.providerKey, url)
+
+        // Tool-call probe
+        if (ENABLE_TOOL_TEST) {
+          const toolCtrl = new AbortController()
+          const toolTimeout = setTimeout(() => toolCtrl.abort(), 1000)
+          toolResult = await toolCallProbe(model, toolCtrl.signal)
+          clearTimeout(toolTimeout)
+        }
+      }
+
+      clearTimeout(timeout)
+
+      model.pings.push({
+        ms: result.ms === 'TIMEOUT' ? TIMEOUT_MS : result.ms,
+        code: result.code
+      })
+      model.status = result.code === '200' ? 'up' : 'down'
+
+      // R-403: Set toolCallOk from live probe result
+      if (toolResult.toolCallOk !== undefined) {
+        model.toolCallOk = toolResult.toolCallOk
+      }
+
+    } catch (err) {
+      clearTimeout(timeout)
+      model.status = 'down'
+      model.toolCallOk = false // R-405: Assume false on error
+    }
+  }
+
+  async function runWithConcurrency(tasks, limit) {
+    const queue = [...tasks]
+    const active = []
+
+    while (queue.length > 0 || active.length > 0) {
+      while (active.length < limit && queue.length > 0) {
+        const task = queue.shift()
+        const p = pingModel(task).then(() => {
+          const idx = active.indexOf(p)
+          if (idx > -1) active.splice(idx, 1)
+        })
+        active.push(p)
+      }
+      if (active.length > 0) await Promise.race(active)
+    }
+  }
+
+  await runWithConcurrency(candidates, MAX_CONCUR)
+
+  // ============================================================
+  // OUTPUT
+  // ============================================================
+
+  const output = candidates.map(m => {
+    const sweNum = parseFloat((m.sweScore || '0').replace('%', '')) || 0
+
+    if (DEGRADED_MODE) {
+      // R-502: Degraded output format
+      const validPings = m.pings.filter(p => p.code === '200' && p.ms > 0)
+      const avgMs = validPings.length > 0
+        ? Math.round(validPings.reduce((a, b) => a + b.ms, 0) / validPings.length)
+        : -1
+
+      // Simple latency-based calculation for degraded mode
+      let stability = 50 // Default mid-range
+      if (avgMs > 0) {
+        if (avgMs < 200) stability = 90
+        else if (avgMs < 400) stability = 75
+        else if (avgMs < 800) stability = 60
+        else if (avgMs < 1500) stability = 45
+        else stability = 30
+      }
+
+      return {
+        modelId: m.modelId,
+        provider: m.providerKey,
+        tier: m.tier,
+        swe: sweNum,
+        status: m.status,
+        // R-502: verdict is "Unknown" in degraded mode
+        verdict: 'Unknown',
+        avgMs: avgMs > 0 ? avgMs : null,
+        // R-502: stability is null in degraded mode
+        stability: null,
+        degraded: true,
+        // R-403: toolCallOk from live probe
+        toolCallOk: m.toolCallOk || false
+      }
+    }
+
+    // Full mode output
+    const stability = getStabilityScore(m)
+    return {
+      modelId: m.modelId,
+      provider: m.providerKey,
+      tier: m.tier,
+      swe: sweNum,
+      status: m.status,
+      verdict: getVerdict(m),
+      avgMs: getAvg(m),
+      stability: Number.isFinite(stability) ? stability : null,
+      // R-403: Include toolCallOk in output
+      toolCallOk: m.toolCallOk || false
+    }
+  })
+
+  process.stdout.write(JSON.stringify(output, null, 2) + '\n')
+  process.exit(0)
+}
+
+main().catch(err => {
+  process.stderr.write(`[fcm-oneshot] Fatal error: ${err.message}\n`)
+  process.exit(1)
+})
