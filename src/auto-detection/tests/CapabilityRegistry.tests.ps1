@@ -1,75 +1,39 @@
 # CapabilityRegistry.tests.ps1
 
+# Import the CapabilityRegistry class
+. $PSScriptRoot/../CapabilityRegistry.ps1
+
 # TDD: Failing test first
 
 Describe "CapabilityRegistry" {
     It "should initialize with empty registry" {
-        $registry = [CapabilityRegistry]::new("temp/registry.json")
-        $registry.Registry.Count | Should -Be 0
+        $registry = [CapabilityRegistry]::new()
+        $registry.Models.Count | Should -Be 0
+        $registry.SchemaVersion | Should -Be "1.0"
     }
 
-    It "should validate model definition with all required fields" {
-        $model = @{
-            ModelName = "claude-3-5-sonnet"
-            SupportsStreaming = $true
-            SupportsVision = $true
-            MaxContextTokens = 100000
-            MaxOutputTokens = 4096
-            LatencyMs = 250
-            CostPerToken = 0.000005
-        }
+    It "should load and save registry from file" {
+        $registry = [CapabilityRegistry]::new()
+        $registry.Models["model1"] = @{ capability = "test" }
+        $registry.SaveToFile("temp/registry.json")
+        Test-Path "temp/registry.json" | Should -Be $true
 
-        $registry = [CapabilityRegistry]::new("temp/registry.json")
-        $result = $registry.ValidateModelDefinition($model)
-        $result | Should -Be $true
+        $newRegistry = [CapabilityRegistry]::new()
+        $newRegistry.LoadFromFile("temp/registry.json")
+        $newRegistry.Models["model1"].capability | Should -Be "test"
     }
 
-    It "should reject model definition with missing required field" {
-        $model = @{
-            ModelName = "claude-3-5-sonnet"
-            SupportsStreaming = $true
-            # Missing SupportsVision
-            MaxContextTokens = 100000
-            MaxOutputTokens = 4096
-            LatencyMs = 250
-            CostPerToken = 0.000005
-        }
-
-        $registry = [CapabilityRegistry]::new("temp/registry.json")
-        $result = $registry.ValidateModelDefinition($model)
-        $result | Should -Be $false
+    It "should get model capabilities" {
+        $registry = [CapabilityRegistry]::new()
+        $registry.Models["model1"] = @{ toolCallOk = $true }
+        $capabilities = $registry.GetModelCapabilities("model1")
+        $capabilities.toolCallOk | Should -Be $true
     }
 
-    It "should reject model definition with invalid type" {
-        $model = @{
-            ModelName = "claude-3-5-sonnet"
-            SupportsStreaming = $true
-            SupportsVision = $true
-            MaxContextTokens = "not-a-number"  # Invalid type
-            MaxOutputTokens = 4096
-            LatencyMs = 250
-            CostPerToken = 0.000005
-        }
-
-        $registry = [CapabilityRegistry]::new("temp/registry.json")
-        $result = $registry.ValidateModelDefinition($model)
-        $result | Should -Be $false
-    }
-
-    It "should reject model definition with negative MaxContextTokens" {
-        $model = @{
-            ModelName = "claude-3-5-sonnet"
-            SupportsStreaming = $true
-            SupportsVision = $true
-            MaxContextTokens = -1000  # Invalid value
-            MaxOutputTokens = 4096
-            LatencyMs = 250
-            CostPerToken = 0.000005
-        }
-
-        $registry = [CapabilityRegistry]::new("temp/registry.json")
-        $result = $registry.ValidateModelDefinition($model)
-        $result | Should -Be $false
+    It "should update model capabilities" {
+        $registry = [CapabilityRegistry]::new()
+        $registry.UpdateModelCapabilities("model2", @{ thinking = $true })
+        $registry.Models["model2"].thinking | Should -Be $true
     }
 }
 

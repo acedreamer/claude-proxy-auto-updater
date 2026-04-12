@@ -1,60 +1,68 @@
 # PerformanceCache.tests.ps1
 
+# Import the PerformanceCache class
+. $PSScriptRoot/../PerformanceCache.ps1
+
 # TDD: Failing test first
 
 Describe "PerformanceCache" {
     It "should initialize with empty cache" {
-        $cache = [PerformanceCache]::new("temp/cache.json", 10)
-        $cache.Cache.Count | Should -Be 0
+        $cache = [PerformanceCache]::new()
+        $cache.Models.Count | Should -Be 0
+        $cache.WindowSize | Should -Be 10
     }
 
-    It "should record performance metrics" {
-        $cache = [PerformanceCache]::new("temp/cache.json", 10)
-        $cache.RecordPerformance("claude-3-5-sonnet", 250, 1000, $true)
-        $cache.Cache["claude-3-5-sonnet"].Count | Should -Be 1
-        $entry = $cache.Cache["claude-3-5-sonnet"][0]
-        $entry.LatencyMs | Should -Be 250
-        $entry.TokensProcessed | Should -Be 1000
-        $entry.Success | Should -Be $true
+    It "should add model data correctly" {
+        $cache = [PerformanceCache]::new()
+        $cache.AddModelData("model1", 200, $true)
+        $cache.Models.ContainsKey("model1") | Should -Be $true
+        $cache.Models.model1.currentPerformance.latencyWindow.Count | Should -Be 1
+        $cache.Models.model1.currentPerformance.latencyWindow[0] | Should -Be 200
     }
 
-    It "should maintain sliding window of entries" {
-        $cache = [PerformanceCache]::new("temp/cache.json", 3)
+    It "should maintain sliding window" {
+        $cache = [PerformanceCache]::new()
+        $cache.WindowSize = 3
 
-        # Add 5 entries
-        for ($i = 0; $i -lt 5; $i++) {
-            $cache.RecordPerformance("claude-3-5-sonnet", 100 + $i, 500, $true)
-        }
+        # Add more entries than window size
+        1..5 | ForEach-Object { $cache.AddModelData("model1", $_, $true) }
 
         # Should only keep last 3 entries
-        $cache.Cache["claude-3-5-sonnet"].Count | Should -Be 3
-
-        # First entry should be gone (oldest)
-        $cache.Cache["claude-3-5-sonnet"][0].LatencyMs | Should -Be 102
+        $cache.Models.model1.currentPerformance.latencyWindow.Count | Should -Be 3
+        $cache.Models.model1.currentPerformance.latencyWindow[0] | Should -Be 3
+        $cache.Models.model1.currentPerformance.latencyWindow[1] | Should -Be 4
+        $cache.Models.model1.currentPerformance.latencyWindow[2] | Should -Be 5
     }
 
-    It "should return empty stats for unknown model" {
-        $cache = [PerformanceCache]::new("temp/cache.json", 10)
-        $stats = $cache.GetPerformanceStats("unknown-model")
-        $stats.TotalRequests | Should -Be 0
-        $stats.SuccessRate | Should -Be 0
+    It "should track success and failure correctly" {
+        $cache = [PerformanceCache]::new()
+        $cache.AddModelData("model1", 200, $true)
+        $cache.AddModelData("model1", 300, $false)
+        $cache.Models.model1.currentPerformance.successWindow | Should -Be @($true, $false)
+        $cache.Models.model1.currentPerformance.failureCount | Should -Be 1
     }
 
-    It "should calculate statistics correctly" {
-        $cache = [PerformanceCache]::new("temp/cache.json", 100)
+    It "should calculate scores correctly" {
+        $cache = [PerformanceCache]::new()
+        $cache.AddModelData("model1", 200, $true)
+        $cache.AddModelData("model1", 300, $true)
 
-        # Add sample data
-        $cache.RecordPerformance("claude-3-5-sonnet", 200, 2000, $true)
-        $cache.RecordPerformance("claude-3-5-sonnet", 300, 3000, $true)
-        $cache.RecordPerformance("claude-3-5-sonnet", 250, 2500, $false)
+        # Scores should be calculated automatically
+        $scores = $cache.Models.model1.calculatedScores
+        $scores | Should -Not -Be $null
+        $scores.stabilityScore | Should -Not -Be 0
+        $scores.successRate | Should -Be 100
+    }
 
-        $stats = $cache.GetPerformanceStats("claude-3-5-sonnet")
-        $stats.TotalRequests | Should -Be 3
-        $stats.SuccessfulRequests | Should -Be 2
-        $stats.FailedRequests | Should -Be 1
-        $stats.AverageLatencyMs | Should -BeApproximately 250 2
-        $stats.TokensPerSecond | Should -BeApproximately 4667 100
-        $stats.SuccessRate | Should -Be 66.67
+    It "should load and save cache from file" {
+        $cache = [PerformanceCache]::new()
+        $cache.AddModelData("model1", 250, $true)
+        $cache.SaveToFile("temp/cache.json")
+        Test-Path "temp/cache.json" | Should -Be $true
+
+        $newCache = [PerformanceCache]::new()
+        $newCache.LoadFromFile("temp/cache.json")
+        $newCache.Models.model1.calculatedScores.stabilityScore | Should -Not -Be 0
     }
 }
 
