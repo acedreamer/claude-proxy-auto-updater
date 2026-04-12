@@ -11,6 +11,7 @@
 *.cache
 model-cache.json
 model-candidates.json
+performance-cache.json
 
 # Backup files
 *.backup
