@@ -50,12 +50,13 @@ const getArg = (flag) => {
   const i = args.indexOf(flag)
   return i !== -1 ? args[i + 1] : null
 }
+const hasFlag = (flag) => args.includes(flag)
 
 const TIMEOUT_MS = parseInt(getArg('--timeout') || '15000', 10)
 const filterProvs = (getArg('--providers') || '').split(',').filter(Boolean)
 const filterTiers = (getArg('--tier') || '').split(',').filter(Boolean)
 const MAX_CONCUR = parseInt(getArg('--concurrency') || '12', 10)
-const ENABLE_TOOL_TEST = !getArg('--no-tool-test') // R-401: Tool-call probe flag
+const ENABLE_TOOL_TEST = !hasFlag('--no-tool-test') // R-401: Tool-call probe flag
 
 // ============================================================
 // KEY RESOLUTION
@@ -164,7 +165,7 @@ async function toolCallProbe(model, signal) {
     const provider = model.providerKey
     const apiKey = KEY_MAP[provider]
 
-    if (!apiKey) return { toolCallOk: false, error: 'No API key' }
+    if (!apiKey) return { toolCallOk: null, probeStatus: 'unknown', reason: 'no_api_key', probeMs: null }
 
     let url, headers, body
 
@@ -197,7 +198,7 @@ async function toolCallProbe(model, signal) {
         max_tokens: 100
       })
     } else {
-      return { toolCallOk: false, error: 'Unknown provider' }
+      return { toolCallOk: null, probeStatus: 'unknown', reason: 'unknown_provider', probeMs: null }
     }
 
     const response = await fetch(url, {
@@ -212,10 +213,19 @@ async function toolCallProbe(model, signal) {
 
     // R-406: Must complete within 1 second total
     if (probeMs > 1000) {
-      return { toolCallOk: false, timedOut: true }
+      return { toolCallOk: null, probeStatus: 'unknown', reason: 'timeout', probeMs }
     }
 
-    const data = await response.json()
+    if (!response.ok) {
+      return { toolCallOk: false, probeStatus: 'fail', reason: `http_${response.status}`, probeMs }
+    }
+
+    let data
+    try {
+      data = await response.json()
+    } catch {
+      return { toolCallOk: null, probeStatus: 'unknown', reason: 'invalid_json', probeMs }
+    }
 
     // R-402: Check for valid tool_use in response
     let hasToolUse = false
@@ -230,13 +240,16 @@ async function toolCallProbe(model, signal) {
       }
     }
 
-    return { toolCallOk: hasToolUse, probeMs }
+    if (hasToolUse) {
+      return { toolCallOk: true, probeStatus: 'pass', reason: 'tool_use_detected', probeMs }
+    }
+    return { toolCallOk: false, probeStatus: 'fail', reason: 'no_tool_use', probeMs }
   } catch (err) {
     // R-405: Fall back on error/timeout
     if (signal.aborted) {
-      return { toolCallOk: false, timedOut: true }
+      return { toolCallOk: null, probeStatus: 'unknown', reason: 'timeout', probeMs: null }
     }
-    return { toolCallOk: false, error: err.name }
+    return { toolCallOk: null, probeStatus: 'unknown', reason: err.name || 'error', probeMs: null }
   }
 }
 
@@ -271,7 +284,8 @@ async function main() {
         prefix,
         pings: [],
         status: 'pending',
-        toolCallOk: null // Will be determined by probe
+        toolCallOk: null,
+        toolCallProbeStatus: 'unknown'
       }))
   } else {
     // Full mode with free-coding-models
@@ -297,7 +311,8 @@ async function main() {
       providerKey,
       pings: [],
       status: 'pending',
-      toolCallOk: false
+      toolCallOk: null,
+      toolCallProbeStatus: 'unknown'
     }))
   }
 
@@ -316,7 +331,7 @@ async function main() {
 
     try {
       let result
-      let toolResult = { toolCallOk: false }
+      let toolResult = { toolCallOk: null, probeStatus: 'unknown', reason: 'disabled' }
 
       if (DEGRADED_MODE) {
         // R-501: Direct HTTP ping when fcm not found
@@ -353,15 +368,14 @@ async function main() {
       })
       model.status = result.code === '200' ? 'up' : 'down'
 
-      // R-403: Set toolCallOk from live probe result
-      if (toolResult.toolCallOk !== undefined) {
-        model.toolCallOk = toolResult.toolCallOk
-      }
+      model.toolCallOk = toolResult.toolCallOk
+      model.toolCallProbeStatus = toolResult.probeStatus || 'unknown'
 
     } catch (err) {
       clearTimeout(timeout)
       model.status = 'down'
-      model.toolCallOk = false // R-405: Assume false on error
+      model.toolCallOk = null
+      model.toolCallProbeStatus = 'unknown'
     }
   }
 
@@ -420,8 +434,8 @@ async function main() {
         // R-502: stability is null in degraded mode
         stability: null,
         degraded: true,
-        // R-403: toolCallOk from live probe
-        toolCallOk: m.toolCallOk || false
+        toolCallOk: m.toolCallOk,
+        toolCallProbeStatus: m.toolCallProbeStatus || 'unknown'
       }
     }
 
@@ -436,8 +450,8 @@ async function main() {
       verdict: getVerdict(m),
       avgMs: getAvg(m),
       stability: Number.isFinite(stability) ? stability : null,
-      // R-403: Include toolCallOk in output
-      toolCallOk: m.toolCallOk || false
+      toolCallOk: m.toolCallOk,
+      toolCallProbeStatus: m.toolCallProbeStatus || 'unknown'
     }
   })
 

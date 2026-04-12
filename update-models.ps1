@@ -24,7 +24,9 @@ $ErrorActionPreference = 'Stop'
 $envPath    = Join-Path $PSScriptRoot ".env"
 $backupPath = "$envPath.backup"
 $cacheFile  = Join-Path $PSScriptRoot "model-cache.json"
+$candidatesFile = Join-Path $PSScriptRoot "model-candidates.json"
 $oneshotScript = Join-Path $PSScriptRoot "fcm-oneshot.mjs"
+$DryRun = ($args -contains '--dry-run') -or ($args -contains '-DryRun')
 
 $Config = @{
     CacheTTLMinutes = 45      # Minutes before re-running fcm-oneshot
@@ -114,6 +116,97 @@ function Get-CapKey {
     return "$Provider/$ModelId"
 }
 
+function Extract-JsonArrayFromText {
+    param([string]$Text)
+    if (-not $Text) { return $null }
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        if ($Text[$i] -ne '[') { continue }
+        for ($j = $Text.Length - 1; $j -gt $i; $j--) {
+            if ($Text[$j] -ne ']') { continue }
+            $candidate = $Text.Substring($i, $j - $i + 1)
+            try {
+                $parsed = $candidate | ConvertFrom-Json
+                if ($parsed -is [System.Array] -or $parsed.Count -ge 0) {
+                    return $parsed
+                }
+            } catch { }
+        }
+    }
+    return $null
+}
+
+function Is-VerdictAllowed {
+    param(
+        [string]$Slot,
+        [string]$Verdict,
+        [bool]$IsDegraded
+    )
+    if ($IsDegraded) { return $true }
+    switch ($Slot) {
+        "opus"     { return $Config.OpusSonnetVerdicts -contains $Verdict }
+        "sonnet"   { return $Config.OpusSonnetVerdicts -contains $Verdict }
+        "haiku"    { return $Config.HaikuVerdicts -contains $Verdict }
+        "fallback" { return $Config.FallbackVerdicts -contains $Verdict }
+    }
+    return $false
+}
+
+function Get-Role {
+    param($Model)
+    $capKey = Get-CapKey $Model.provider $Model.modelId
+    if ($ModelCaps.ContainsKey($capKey) -and $ModelCaps[$capKey].role) {
+        return $ModelCaps[$capKey].role
+    }
+    return "balanced"
+}
+
+function Get-IsThinking {
+    param($Model)
+    $capKey = Get-CapKey $Model.provider $Model.modelId
+    if ($ModelCaps.ContainsKey($capKey)) {
+        return [bool]$ModelCaps[$capKey].thinking
+    }
+    return $false
+}
+
+function Get-ToolCallEffective {
+    param($Model)
+    $status = [string]$Model.toolCallProbeStatus
+    if ($status -eq "pass") { return $true }
+    if ($status -eq "fail") { return $false }
+    if ($status -and $status -ne "unknown" -and $null -ne $Model.toolCallOk) {
+        return [bool]$Model.toolCallOk
+    }
+
+    $capKey = Get-CapKey $Model.provider $Model.modelId
+    if ($ModelCaps.ContainsKey($capKey)) {
+        return [bool]$ModelCaps[$capKey].toolCallOk
+    }
+    return $false
+}
+
+function Get-TopCandidates {
+    param(
+        [array]$Models,
+        [hashtable]$Weight,
+        [int]$Top = 3
+    )
+    return $Models |
+        Sort-Object { Get-Score $_ $Weight } -Descending |
+        Select-Object -First $Top |
+        ForEach-Object {
+            [PSCustomObject]@{
+                model = $_.modelId
+                prefix = (Get-ModelPrefix $_.provider $_.modelId)
+                score = [math]::Round((Get-Score $_ $Weight), 1)
+                verdict = $_.verdict
+                avgMs = $_.avgMs
+                stability = $_.stability
+                toolCallOk = $_.effectiveToolCallOk
+            }
+        }
+}
+
 # ============================================================
 #  LOAD KEYS
 # ============================================================
@@ -187,40 +280,12 @@ if (-not $usingCache) {
     $exitCode  = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
 
-    # Separate stderr (log lines starting with [fcm-oneshot]) from stdout (JSON)
-    $jsonLines = @()
-    $logLines  = @()
-    foreach ($line in $rawOutput) {
-        $lineStr = [string]$line
-        if ($lineStr.TrimStart().StartsWith("[fcm-oneshot]") -or $lineStr.TrimStart().StartsWith("[")) {
-            # Could be log or JSON start - check more carefully
-            if ($lineStr.TrimStart().StartsWith("[fcm-oneshot]")) {
-                $logLines += $lineStr
-                Write-Host "  $lineStr" -ForegroundColor DarkGray
-            } else {
-                $jsonLines += $lineStr
-            }
-        } else {
-            $jsonLines += $lineStr
-        }
-    }
-
-    $jsonStr = ($jsonLines -join "`n").Trim()
-
-    # Find the JSON array in output
-    $jsonStart = $jsonStr.IndexOf("[")
-    $jsonEnd   = $jsonStr.LastIndexOf("]")
-
-    if ($jsonStart -ge 0 -and $jsonEnd -gt $jsonStart) {
-        $jsonStr = $jsonStr.Substring($jsonStart, $jsonEnd - $jsonStart + 1)
-        try {
-            $parsed = $jsonStr | ConvertFrom-Json
-            if ($parsed -and $parsed.Count -gt 0) {
-                $liveModels = $parsed
-            }
-        } catch {
-            Write-Host "[WARN] JSON parse failed: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+    $rawText = ($rawOutput | ForEach-Object { [string]$_ }) -join "`n"
+    $parsed = Extract-JsonArrayFromText -Text $rawText
+    if ($parsed -and $parsed.Count -gt 0) {
+        $liveModels = $parsed
+    } else {
+        Write-Host "[WARN] JSON parse failed from fcm-oneshot output." -ForegroundColor Yellow
     }
 
     if ($null -eq $liveModels -or $liveModels.Count -eq 0) {
@@ -249,12 +314,42 @@ if (-not $usingCache) {
 # ============================================================
 #  SCORING & ASSIGNMENT
 # ============================================================
+$script:IsDegraded = @($liveModels | Where-Object { $_.degraded -eq $true }).Count -gt 0
+if ($script:IsDegraded) {
+    Write-Host "[WARN] free-coding-models not found. Install with: npm install -g free-coding-models for full scoring." -ForegroundColor Yellow
+}
+
+$normalizedModels = @(
+    $liveModels | ForEach-Object {
+        $effectiveTool = Get-ToolCallEffective $_
+        [PSCustomObject]@{
+            modelId = $_.modelId
+            provider = $_.provider
+            tier = $_.tier
+            swe = if ($null -ne $_.swe) { [double]$_.swe } elseif ($null -ne $_.sweBench) { [double]$_.sweBench } else { 0.0 }
+            status = $_.status
+            verdict = if ($_.verdict) { $_.verdict } else { "Unknown" }
+            avgMs = if ($null -ne $_.avgMs) { [double]$_.avgMs } else { 9999.0 }
+            stability = if ($null -ne $_.stability) { [double]$_.stability } else { 0.0 }
+            degraded = [bool]$_.degraded
+            toolCallOk = $_.toolCallOk
+            toolCallProbeStatus = if ($_.toolCallProbeStatus) { [string]$_.toolCallProbeStatus } else { "unknown" }
+            effectiveToolCallOk = $effectiveTool
+            role = (Get-Role $_)
+            thinking = (Get-IsThinking $_)
+        }
+    }
+)
+
 function Get-Score {
     param($model, [hashtable]$W)
-    $sweScore  = [double]$model.swe
-    $stability = if ($null -ne $model.stability) { [double]$model.stability } else { 30.0 }
-    $avgMs     = if ($null -ne $model.avgMs)     { [double]$model.avgMs }     else { 9999.0 }
+    $avgMs = if ($null -ne $model.avgMs) { [double]$model.avgMs } else { 9999.0 }
     $latScore  = [math]::Max(0, [math]::Min(100, 100 - (($avgMs - $W.LatTarget) * $W.LatPenalty)))
+    if ($script:IsDegraded) {
+        return $latScore
+    }
+    $sweScore  = if ($null -ne $model.swe) { [double]$model.swe } else { 0.0 }
+    $stability = if ($null -ne $model.stability) { [double]$model.stability } else { 30.0 }
     $nimBonus  = if ($model.provider -eq "nvidia") { 8 } else { 0 }
     return ($sweScore * $W.SWE) + ($stability * $W.Stab) + ($latScore * $W.Lat) + ($nimBonus * $W.NIM)
 }
@@ -266,23 +361,78 @@ $Weights = @{
     Fallback = @{ SWE=0.30; Stab=0.40; Lat=0.15; NIM=1.0; LatTarget=500;  LatPenalty=0.04 }
 }
 
-# Filter & Assign
-$opusCandidate = $liveModels | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
-$sonnetCandidate = $liveModels | Where-Object { $_.modelId -ne $opusCandidate.modelId } | Sort-Object { Get-Score $_ $Weights.Sonnet } -Descending | Select-Object -First 1
-if (-not $sonnetCandidate) { $sonnetCandidate = $opusCandidate }
-$haikuCandidate = $liveModels | Where-Object { $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) } | Sort-Object { Get-Score $_ $Weights.Haiku } -Descending | Select-Object -First 1
-if (-not $haikuCandidate) { $haikuCandidate = $sonnetCandidate }
-$fallbackCandidate = $liveModels | Sort-Object { Get-Score $_ $Weights.Fallback } -Descending | Select-Object -First 1
+$opusEligible = @(
+    $normalizedModels | Where-Object {
+        $_.effectiveToolCallOk -and
+        $_.role -eq "heavy" -and
+        (-not $_.thinking) -and
+        (Is-VerdictAllowed -Slot "opus" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
+    }
+)
+if ($opusEligible.Count -eq 0) {
+    $opusEligible = @($normalizedModels | Where-Object { $_.effectiveToolCallOk -and $_.role -eq "heavy" -and (-not $_.thinking) })
+}
+$opusCandidate = $opusEligible | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
+if (-not $opusCandidate) {
+    $opusCandidate = $normalizedModels | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
+}
 
-# Thinking Mode
-$isThinking = "false"
-$sonnetCapKey = Get-CapKey $sonnetCandidate.provider $sonnetCandidate.modelId
-if ($ModelCaps.ContainsKey($sonnetCapKey) -and $ModelCaps[$sonnetCapKey].thinking) {
-    $isThinking = "true"
+$sonnetEligible = @(
+    $normalizedModels | Where-Object {
+        $_.modelId -ne $opusCandidate.modelId -and
+        $_.effectiveToolCallOk -and
+        $_.role -eq "balanced" -and
+        (Is-VerdictAllowed -Slot "sonnet" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
+    }
+)
+if ($sonnetEligible.Count -eq 0) {
+    $sonnetEligible = @($normalizedModels | Where-Object { $_.modelId -ne $opusCandidate.modelId -and $_.effectiveToolCallOk -and $_.role -eq "balanced" })
+}
+$sonnetCandidate = $sonnetEligible | Sort-Object { Get-Score $_ $Weights.Sonnet } -Descending | Select-Object -First 1
+if (-not $sonnetCandidate) { $sonnetCandidate = $opusCandidate }
+
+$haikuEligible = @(
+    $normalizedModels | Where-Object {
+        $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) -and
+        $_.role -eq "fast" -and
+        (Is-VerdictAllowed -Slot "haiku" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
+    }
+)
+if ($haikuEligible.Count -eq 0) {
+    $haikuEligible = @($normalizedModels | Where-Object { $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) -and $_.role -eq "fast" })
+}
+$haikuCandidate = $haikuEligible | Sort-Object { Get-Score $_ $Weights.Haiku } -Descending | Select-Object -First 1
+if (-not $haikuCandidate) { $haikuCandidate = $sonnetCandidate }
+
+$fallbackEligible = @(
+    $normalizedModels | Where-Object {
+        $_.effectiveToolCallOk -and
+        (Is-VerdictAllowed -Slot "fallback" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
+    }
+)
+if ($fallbackEligible.Count -eq 0) {
+    $fallbackEligible = @($normalizedModels | Where-Object { $_.effectiveToolCallOk })
+}
+$fallbackCandidate = $fallbackEligible | Sort-Object { Get-Score $_ $Weights.Fallback } -Descending | Select-Object -First 1
+if (-not $fallbackCandidate) { $fallbackCandidate = $opusCandidate }
+
+$isThinking = if ($sonnetCandidate.thinking) { "true" } else { "false" }
+
+$candidatesJson = [ordered]@{
+    opus     = @(Get-TopCandidates -Models $opusEligible -Weight $Weights.Opus -Top 3)
+    sonnet   = @(Get-TopCandidates -Models $sonnetEligible -Weight $Weights.Sonnet -Top 3)
+    haiku    = @(Get-TopCandidates -Models $haikuEligible -Weight $Weights.Haiku -Top 3)
+    fallback = @(Get-TopCandidates -Models $fallbackEligible -Weight $Weights.Fallback -Top 3)
+}
+try {
+    $candidatesJson | ConvertTo-Json -Depth 6 | Out-File $candidatesFile -Encoding utf8
+    Write-Host "[OK] Candidates written to $candidatesFile" -ForegroundColor Green
+} catch {
+    Write-Host "[WARN] Failed to write ${candidatesFile}: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 # Build .env
-$envLines = Get-Content $envPath
+$envLines = if (Test-Path $envPath) { Get-Content $envPath } else { @() }
 $newLines = @()
 $mappings = @{
     "MODEL_OPUS="          = "MODEL_OPUS=`"$(Get-ModelPrefix $opusCandidate.provider $opusCandidate.modelId)`""
@@ -302,8 +452,18 @@ foreach ($line in $envLines) {
     if (-not $matched) { $newLines += $line }
 }
 
-Set-Content -Path $envPath -Value $newLines -Encoding UTF8
-Write-Host "[OK] .env updated via fcm-oneshot telemetry." -ForegroundColor Green
+foreach ($prefix in $mappings.Keys) {
+    if (-not ($newLines | Where-Object { $_.TrimStart().StartsWith($prefix) })) {
+        $newLines += $mappings[$prefix]
+    }
+}
+
+if ($DryRun) {
+    Write-Host "[DRY RUN] .env not modified" -ForegroundColor Yellow
+} else {
+    Set-Content -Path $envPath -Value $newLines -Encoding UTF8
+    Write-Host "[OK] .env updated via fcm-oneshot telemetry." -ForegroundColor Green
+}
 
 # SECURITY: Clean up sensitive data from memory
 if ($env:NVIDIA_API_KEY) { Remove-Item Env:\NVIDIA_API_KEY -ErrorAction SilentlyContinue }
