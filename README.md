@@ -117,7 +117,7 @@ Preview changes without modifying `.env`:
 
 ```powershell
 # Windows
-.\update-models.ps1 -DryRun
+.\update-models.ps1 --dry-run
 
 # Linux/macOS
 ./update-models.sh --dry-run
@@ -193,7 +193,7 @@ If `free-coding-models` is not installed:
  Install for full features: npm install -g free-coding-models
  Continuing with latency-only HTTP pings...
 
-[WARN] Running in degraded mode. Install free-coding-models for full scoring.
+[WARN] free-coding-models not found. Install with: npm install -g free-coding-models for full scoring.
 ```
 
 The script continues with:

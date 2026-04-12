@@ -21,6 +21,7 @@ readonly CACHE_TTL_MINUTES=45
 readonly PING_TIMEOUT_MS=15000
 readonly PROVIDERS="nvidia,openrouter"
 readonly TIER_FILTER="S,A"
+DEGRADED_MODE=false
 
 # ============================================================
 # MODEL CAPABILITY REGISTRY
@@ -36,6 +37,8 @@ declare -A MODEL_DATA_STATUS
 declare -A MODEL_DATA_PROVIDER
 declare -A MODEL_DATA_MODELID
 declare -A MODEL_DATA_TIER
+declare -A MODEL_DATA_TOOLCALLOK
+declare -A MODEL_DATA_TOOLCALL_STATUS
 
 # Slot tracking for M2 Transparency
 declare -A SLOT_WINNER
@@ -76,7 +79,7 @@ init_model_caps() {
     MODEL_CAPS_THINKING["nvidia/moonshotai/kimi-k2-thinking"]="true"
     MODEL_CAPS_THINKING["openrouter/deepseek/deepseek-r1:free"]="true"
     MODEL_CAPS_THINKING["openrouter/deepseek/deepseek-r1-0528:free"]="true"
-    MODEL_CAPS_THINKING["openrunner/qwen/qwen3.6-plus:free"]="true"
+    MODEL_CAPS_THINKING["openrouter/qwen/qwen3.6-plus:free"]="true"
 
     MODEL_CAPS_ROLE["nvidia/moonshotai/kimi-k2.5"]="heavy"
     MODEL_CAPS_ROLE["nvidia/moonshotai/kimi-k2-thinking"]="heavy"
@@ -125,8 +128,14 @@ read_env_file() {
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$line" ]] && continue
-        if [[ "$line" =~ ^([A-Z_]+)=[[:space:]]*\"?([^\"]*+)\"?[[:space:]]*$ ]]; then
-            echo "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+        if [[ "$line" =~ ^[[:space:]]*([A-Z_][A-Z0-9_]*)[[:space:]]*=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            value="${value%$'\r'}"
+            if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+                value="${BASH_REMATCH[1]}"
+            fi
+            echo "${key}=${value}"
         fi
     done < "$path" 2>/dev/null || true
 }
@@ -163,39 +172,60 @@ parse_model_json() {
     MODEL_DATA_PROVIDER=()
     MODEL_DATA_MODELID=()
     MODEL_DATA_TIER=()
+    MODEL_DATA_TOOLCALL_STATUS=()
+    DEGRADED_MODE=false
 
-    # Extract JSON objects by finding patterns
-    local temp_json="${json//\\n/ }"
+    local parsed_lines
+    if ! parsed_lines=$(printf '%s' "$json" | node -e '
+const fs = require("fs");
+const input = fs.readFileSync(0, "utf8");
+let arr;
+try { arr = JSON.parse(input); } catch { process.exit(2); }
+if (!Array.isArray(arr)) process.exit(3);
+const asNum = (v, def) => {
+  if (v === null || v === undefined || v === "") return def;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+const asBoolStr = (v) => (v === true ? "true" : v === false ? "false" : "null");
+for (const obj of arr) {
+  const row = [
+    String(obj.provider ?? ""),
+    String(obj.modelId ?? ""),
+    String(asNum(obj.swe ?? obj.sweBench, 0)),
+    obj.stability === null || obj.stability === undefined ? "null" : String(asNum(obj.stability, 0)),
+    obj.avgMs === null || obj.avgMs === undefined ? "null" : String(asNum(obj.avgMs, 9999)),
+    String(obj.verdict ?? "Unknown"),
+    String(obj.tier ?? "C"),
+    asBoolStr(obj.toolCallOk),
+    String(obj.toolCallProbeStatus ?? "unknown"),
+    String(obj.status ?? "down"),
+    obj.degraded === true ? "true" : "false"
+  ];
+  process.stdout.write(row.join("\t") + "\n");
+}
+'); then
+        echo "0"
+        return 0
+    fi
 
-    # Simple parsing of model objects
-    while [[ "$temp_json" =~ \{[[:space:]]*\"provider\"[[:space:]]*\:[[:space:]]*\"([^\"]+)\"[[:space:]]*,[[:space:]]*\"modelId\"[[:space:]]*\:[[:space:]]*\"([^\"]+)\"[[:space:]]*,[[:space:]]*\"sweBench\"[[:space:]]*\:[[:space:]]*([0-9.]+)[[:space:]]*,[[:space:]]*\"stability\"[[:space:]]*\:[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*\"avgMs\"[[:space:]]*\:[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*\"verdict\"[[:space:]]*\:[[:space:]]*\"([^\"]+)\" ]]; do
-        MODEL_DATA_PROVIDER[$idx]="${BASH_REMATCH[1]}"
-        MODEL_DATA_MODELID[$idx]="${BASH_REMATCH[2]}"
-        MODEL_DATA_SWE[$idx]="${BASH_REMATCH[3]}"
-        MODEL_DATA_STABILITY[$idx]="${BASH_REMATCH[4]}"
-        MODEL_DATA_AVGMS[$idx]="${BASH_REMATCH[5]}"
-        MODEL_DATA_VERDICT[$idx]="${BASH_REMATCH[6]}"
-
-        # Try to extract toolCallOk from JSON output (R-403: auto-detected)
-        local full_obj_match
-        full_obj_match="provider\":\"${BASH_REMATCH[1]}\",\"modelId\":\"${BASH_REMATCH[2]}\","
-        if [[ "$temp_json" =~ ${full_obj_match}[^,}]*\"toolCallOk\"[[:space:]]*\:[[:space:]]*(true|false|null) ]]; then
-            MODEL_DATA_TOOLCALLOK[$idx]="${BASH_REMATCH[1]}"
-        else
-            MODEL_DATA_TOOLCALLOK[$idx]="unknown"
-        fi
-
-        # Try to extract tier and status
-        local obj_match="provider\":\"${BASH_REMATCH[1]}\",\"modelId\":\"${BASH_REMATCH[2]}\","
-        if [[ "$temp_json" =~ ${obj_match}[^,}]*\"tier\"[[:space:]]*\:[[:space:]]*\"([^\"]+)\" ]]; then
-            MODEL_DATA_TIER[$idx]="${BASH_REMATCH[1]}"
-        else
-            MODEL_DATA_TIER[$idx]="C"
-        fi
-        ((idx++))
-        temp_json="${temp_json#*${obj_match}}"
-        temp_json="${temp_json#*}}}"
-    done
+    while IFS=$'\t' read -r provider modelid swe stability avgms verdict tier toolcall toolstatus status degraded || [[ -n "${provider:-}" ]]; do
+        [[ -z "${provider:-}" || -z "${modelid:-}" ]] && continue
+        MODEL_DATA_PROVIDER[$idx]="$provider"
+        MODEL_DATA_MODELID[$idx]="$modelid"
+        MODEL_DATA_SWE[$idx]="${swe:-0}"
+        MODEL_DATA_STABILITY[$idx]="${stability:-0}"
+        MODEL_DATA_AVGMS[$idx]="${avgms:-9999}"
+        [[ "${MODEL_DATA_STABILITY[$idx]}" == "null" ]] && MODEL_DATA_STABILITY[$idx]="0"
+        [[ "${MODEL_DATA_AVGMS[$idx]}" == "null" ]] && MODEL_DATA_AVGMS[$idx]="9999"
+        MODEL_DATA_VERDICT[$idx]="${verdict:-Unknown}"
+        MODEL_DATA_TIER[$idx]="${tier:-C}"
+        MODEL_DATA_TOOLCALLOK[$idx]="${toolcall:-null}"
+        MODEL_DATA_TOOLCALL_STATUS[$idx]="${toolstatus:-unknown}"
+        MODEL_DATA_STATUS[$idx]="${status:-down}"
+        [[ "${degraded:-false}" == "true" ]] && DEGRADED_MODE=true
+        idx=$((idx + 1))
+    done <<< "$parsed_lines"
 
     echo "$idx"
 }
@@ -209,10 +239,13 @@ calculate_score() {
     local stability="${MODEL_DATA_STABILITY[$idx]:-30}"
     local avgms="${MODEL_DATA_AVGMS[$idx]:-9999}"
     local provider="${MODEL_DATA_PROVIDER[$idx]:-unknown}"
-    local cam_eol="${MODEL_DATA_MODELID[$idx]##*-}"
-
-    # Map 24->24, 25->25, 26->26, 27->27, 28->28, 29->29, 30->30, 31->99
-    local date_score=$(( (${cam_eol:-0} * 5) ))
+    if [[ "$DEGRADED_MODE" == "true" ]]; then
+        local lat_only=$(( 100 - (avgms / 100) ))
+        [[ $lat_only -lt 0 ]] && lat_only=0
+        [[ $lat_only -gt 100 ]] && lat_only=100
+        echo "$lat_only"
+        return 0
+    fi
 
     local lat_score=$(( 100 - (avgms / 100) ))
     if [[ $lat_score -lt 0 ]]; then lat_score=0; fi
@@ -229,7 +262,7 @@ calculate_score() {
     local nim_bonus=0
     [[ "$provider" == "nvidia" ]] && nim_bonus=8
 
-    local score=$(awk "BEGIN { printf \"%.1f\", ($swe * $swe_w) + ($stability * $stab_w) + ($lat_score/100 * $lat_w) + ($nim_bonus * $nim_w) + $date_score }")
+    local score=$(awk "BEGIN { printf \"%.1f\", ($swe * $swe_w) + ($stability * $stab_w) + ($lat_score/100 * $lat_w) + ($nim_bonus * $nim_w) }")
     echo "$score"
 }
 
@@ -240,10 +273,6 @@ calculate_score_breakdown() {
     local stability="${MODEL_DATA_STABILITY[$idx]:-30}"
     local avgms="${MODEL_DATA_AVGMS[$idx]:-9999}"
     local provider="${MODEL_DATA_PROVIDER[$idx]:-unknown}"
-    local cam_eol="${MODEL_DATA_MODELID[$idx]##*-}"
-
-    local date_score=$(( (${cam_eol:-0} * 5) ))
-
     local swe_w stab_w lat_w nim_w
     local lat_target lat_penalty
     case "$weight_name" in
@@ -264,11 +293,18 @@ calculate_score_breakdown() {
     [[ "$provider" == "nvidia" ]] && nim_bonus=8
 
     local swe_contrib stab_contrib lat_contrib nim_contrib total
+    if [[ "$DEGRADED_MODE" == "true" ]]; then
+        local lat_only
+        lat_only=$(awk "BEGIN { val = 100 - ($avgms / 100); if (val < 0) val = 0; if (val > 100) val = 100; printf \"%.1f\", val }")
+        echo "${lat_only}|0.0|0.0|${lat_only}|0.0|$avgms"
+        return 0
+    fi
+
     swe_contrib=$(awk "BEGIN { printf \"%.1f\", $swe * $swe_w }")
     stab_contrib=$(awk "BEGIN { printf \"%.1f\", $stability * $stab_w }")
     lat_contrib=$(awk "BEGIN { printf \"%.1f\", $lat_score * $lat_w }")
     nim_contrib=$(awk "BEGIN { printf \"%.1f\", $nim_bonus * $nim_w }")
-    total=$(awk "BEGIN { printf \"%.1f\", $swe_contrib + $stab_contrib + $lat_contrib + $nim_contrib + $date_score }")
+    total=$(awk "BEGIN { printf \"%.1f\", $swe_contrib + $stab_contrib + $lat_contrib + $nim_contrib }")
 
     echo "$total|$swe_contrib|$stab_contrib|$lat_contrib|$nim_contrib|$avgms"
 }
@@ -279,17 +315,38 @@ tool_call_ok() {
     local idx="$3"
 
     # R-403: Check auto-detected value first if we have the model index
-    if [[ -n "$idx" && -n "${MODEL_DATA_TOOLCALLOK[$idx]:-}" ]]; then
+    if [[ -n "$idx" && -n "${MODEL_DATA_TOOLCALL_STATUS[$idx]:-}" ]]; then
+        local status="${MODEL_DATA_TOOLCALL_STATUS[$idx]}"
+        local detected="${MODEL_DATA_TOOLCALLOK[$idx]:-null}"
+        [[ "$status" == "pass" ]] && return 0
+        [[ "$status" == "fail" ]] && return 1
+        if [[ "$status" != "unknown" && "$detected" == "true" ]]; then
+            return 0
+        fi
+        if [[ "$status" != "unknown" && "$detected" == "false" ]]; then
+            return 1
+        fi
+    elif [[ -n "$idx" && -n "${MODEL_DATA_TOOLCALLOK[$idx]:-}" ]]; then
         local detected="${MODEL_DATA_TOOLCALLOK[$idx]}"
         [[ "$detected" == "true" ]] && return 0
         [[ "$detected" == "false" ]] && return 1
-        # "unknown" falls through to registry lookup
     fi
 
     # R-405: Fall back to static registry
     local cap_key
     cap_key=$(get_cap_key "$provider" "$model_id")
     [[ "${MODEL_CAPS_TOOLCALLOK[$cap_key]:-false}" == "true" ]]
+}
+
+verdict_allowed() {
+    local slot="$1" verdict="$2"
+    [[ "$DEGRADED_MODE" == "true" ]] && return 0
+    case "$slot" in
+        opus|sonnet) [[ "$verdict" == "Perfect" || "$verdict" == "Normal" ]] ;;
+        haiku) [[ "$verdict" == "Perfect" || "$verdict" == "Normal" || "$verdict" == "Slow" ]] ;;
+        fallback) [[ "$verdict" == "Perfect" || "$verdict" == "Normal" || "$verdict" == "Slow" || "$verdict" == "Spiky" ]] ;;
+        *) return 1 ;;
+    esac
 }
 
 is_thinking_model() {
@@ -380,8 +437,9 @@ assign_slots() {
         local modelid="${MODEL_DATA_MODELID[$idx]}"
         local verdict="${MODEL_DATA_VERDICT[$idx]}"
 
-        [[ "$verdict" != "Perfect" && "$verdict" != "Normal" ]] && continue
+        verdict_allowed "opus" "$verdict" || continue
         tool_call_ok "$provider" "$modelid" "$idx" || continue
+        [[ "$(get_role "$provider" "$modelid")" != "heavy" ]] && continue
         is_thinking_model "$provider" "$modelid" && continue
 
         local score="${opus_scores[$idx]}"
@@ -405,6 +463,7 @@ assign_slots() {
             local provider="${MODEL_DATA_PROVIDER[$idx]}"
             local modelid="${MODEL_DATA_MODELID[$idx]}"
             tool_call_ok "$provider" "$modelid" "$idx" || continue
+            [[ "$(get_role "$provider" "$modelid")" != "heavy" ]] && continue
             is_thinking_model "$provider" "$modelid" && continue
             local score="${opus_scores[$idx]}"
             local score_int="${score%%.*}"
@@ -434,8 +493,9 @@ assign_slots() {
         local provider="${MODEL_DATA_PROVIDER[$idx]}"
         local modelid="${MODEL_DATA_MODELID[$idx]}"
         local verdict="${MODEL_DATA_VERDICT[$idx]}"
-        [[ "$verdict" != "Perfect" && "$verdict" != "Normal" ]] && continue
+        verdict_allowed "sonnet" "$verdict" || continue
         tool_call_ok "$provider" "$modelid" "$idx" || continue
+        [[ "$(get_role "$provider" "$modelid")" != "balanced" ]] && continue
         local score="${sonnet_scores[$idx]}"
         local score_int="${score%%.*}"
 
@@ -473,6 +533,8 @@ assign_slots() {
         [[ "$idx" == "$best_sn_idx" ]] && continue
         local provider="${MODEL_DATA_PROVIDER[$idx]}"
         local modelid="${MODEL_DATA_MODELID[$idx]}"
+        local verdict="${MODEL_DATA_VERDICT[$idx]}"
+        verdict_allowed "haiku" "$verdict" || continue
         [[ "$(get_role "$provider" "$modelid")" != "fast" ]] && continue
         local score="${haiku_scores[$idx]}"
         local score_int="${score%%.*}"
@@ -511,6 +573,8 @@ assign_slots() {
         local idx="${model_indices[$i]}"
         local provider="${MODEL_DATA_PROVIDER[$idx]}"
         local modelid="${MODEL_DATA_MODELID[$idx]}"
+        local verdict="${MODEL_DATA_VERDICT[$idx]}"
+        verdict_allowed "fallback" "$verdict" || continue
         tool_call_ok "$provider" "$modelid" "$idx" || continue
         local stability="${MODEL_DATA_STABILITY[$idx]:-0}"
         local score="${fallback_scores[$idx]}"
@@ -743,6 +807,7 @@ write_env_file() {
         echo "  MODEL_HAIKU=\"$haiku_str\""
         echo "  MODEL=\"$fallback_str\""
         echo "  NIM_ENABLE_THINKING=$is_thinking"
+        echo "[DRY RUN] .env not modified"
         return 0
     fi
 
@@ -844,8 +909,26 @@ main() {
             log_warn "fcm-oneshot may have returned partial data"
         fi
 
-        # Extract JSON array
-        json_output=$(echo "$raw_output" | sed -n '/\[/,/\]/p' | tr -d '\n')
+        # Robustly extract JSON array from mixed logs/stdout
+        json_output=$(printf '%s' "$raw_output" | node -e '
+const fs = require("fs");
+const s = fs.readFileSync(0, "utf8");
+for (let i = 0; i < s.length; i++) {
+  if (s[i] !== "[") continue;
+  for (let j = s.length - 1; j > i; j--) {
+    if (s[j] !== "]") continue;
+    const candidate = s.slice(i, j + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) {
+        process.stdout.write(JSON.stringify(parsed));
+        process.exit(0);
+      }
+    } catch {}
+  }
+}
+process.exit(1);
+' 2>/dev/null || true)
 
         if [[ -z "$json_output" ]]; then
             log_warn "fcm-oneshot returned no JSON data. Using existing .env."
@@ -868,8 +951,9 @@ main() {
     log_info "Processing $model_count models..."
 
     # Check for degraded mode from fcm-oneshot output
-    if echo "$json_output" | grep -q '"degraded":true'; then
-        log_warn "Running in degraded mode. Install free-coding-models for full scoring."
+    if [[ "$DEGRADED_MODE" == "true" ]] || echo "$json_output" | grep -q '"degraded":true'; then
+        DEGRADED_MODE=true
+        log_warn "free-coding-models not found. Install with: npm install -g free-coding-models for full scoring."
     fi
 
     # Assign slots
