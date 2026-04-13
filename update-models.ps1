@@ -420,23 +420,65 @@ try {
     Write-Host "[WARN] Failed to write ${candidatesFile}: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
-$opusScore = [math]::Round((Get-Score $opusCandidate $Weights.Opus), 1)
-$sonnetScore = [math]::Round((Get-Score $sonnetCandidate $Weights.Sonnet), 1)
-$haikuScore = [math]::Round((Get-Score $haikuCandidate $Weights.Haiku), 1)
-$fallbackScore = [math]::Round((Get-Score $fallbackCandidate $Weights.Fallback), 1)
+function Get-PrintableRunnerUp {
+    param($col)
+    if (-not $col -or $col.Count -lt 2) { return "none" }
+    $runner = $col[1].model.Split("/")[-1]
+    if ($runner.Length -gt 15) { $runner = $runner.Substring(0, 15) + ".." }
+    $diff = [math]::Round($col[0].score - $col[1].score, 1)
+    return "$runner (d-$diff)"
+}
 
-$opusThinking = if ($opusCandidate.thinking) { "Yes" } else { "No" }
-$sonnetThinking = if ($sonnetCandidate.thinking) { "Yes" } else { "No" }
-$haikuThinking = if ($haikuCandidate.thinking) { "Yes" } else { "No" }
-$fallbackThinking = if ($fallbackCandidate.thinking) { "Yes" } else { "No" }
+function Get-ScoreComponents {
+    param($model, [hashtable]$W)
+    $avgMs = if ($null -ne $model.avgMs -and $model.avgMs -ne 9999.0) { [double]$model.avgMs } else { 9999.0 }
+    $latScore = [math]::Max(0, [math]::Min(100, 100 - (($avgMs - $W.LatTarget) * $W.LatPenalty)))
+    if ($script:IsDegraded) { return [PSCustomObject]@{ SWE=0; Stab=0; Lat=$latScore; NIM=0; Total=$latScore } }
+    
+    $sweScore  = if ($null -ne $model.swe) { [double]$model.swe } else { 0.0 }
+    $stability = if ($null -ne $model.stability) { [double]$model.stability } else { 30.0 }
+    $nimBonus  = if ($model.provider -eq "nvidia") { 8 } else { 0 }
+    
+    return [PSCustomObject]@{
+        SWE   = [math]::Round($sweScore * $W.SWE, 1)
+        Stab  = [math]::Round($stability * $W.Stab, 1)
+        Lat   = [math]::Round($latScore * $W.Lat, 1)
+        NIM   = [math]::Round($nimBonus * $W.NIM, 1)
+        Total = [math]::Round((($sweScore * $W.SWE) + ($stability * $W.Stab) + ($latScore * $W.Lat) + ($nimBonus * $W.NIM)), 1)
+    }
+}
+
+$slots = @(
+    [PSCustomObject]@{ Name="OPUS";     Model=$opusCandidate;     Weight=$Weights.Opus;     Json=$candidatesJson.opus }
+    [PSCustomObject]@{ Name="SONNET";   Model=$sonnetCandidate;   Weight=$Weights.Sonnet;   Json=$candidatesJson.sonnet }
+    [PSCustomObject]@{ Name="HAIKU";    Model=$haikuCandidate;    Weight=$Weights.Haiku;    Json=$candidatesJson.haiku }
+    [PSCustomObject]@{ Name="FALLBACK"; Model=$fallbackCandidate; Weight=$Weights.Fallback; Json=$candidatesJson.fallback }
+)
 
 Write-Host ""
-Write-Host "======== SELECTED MODELS ========" -ForegroundColor Cyan
-Write-Host "  OPUS     : $(Get-ModelPrefix $opusCandidate.provider $opusCandidate.modelId) (Score: $opusScore | Thinking: $opusThinking)" -ForegroundColor White
-Write-Host "  SONNET   : $(Get-ModelPrefix $sonnetCandidate.provider $sonnetCandidate.modelId) (Score: $sonnetScore | Thinking: $sonnetThinking)" -ForegroundColor White
-Write-Host "  HAIKU    : $(Get-ModelPrefix $haikuCandidate.provider $haikuCandidate.modelId) (Score: $haikuScore | Thinking: $haikuThinking)" -ForegroundColor White
-Write-Host "  FALLBACK : $(Get-ModelPrefix $fallbackCandidate.provider $fallbackCandidate.modelId) (Score: $fallbackScore | Thinking: $fallbackThinking)" -ForegroundColor White
-Write-Host "=================================" -ForegroundColor Cyan
+Write-Host "============= MODEL SELECTION ===========================================================================" -ForegroundColor Cyan
+Write-Host ("{0,-10} | {1,-42} | {2,-5} | {3,-6} | {4,-7} | {5,-7} | {6}" -f "SLOT", "MODEL", "THINK", "SCORE", "VERDICT", "LAT(ms)", "Runner-up") -ForegroundColor DarkGray
+Write-Host "=========================================================================================================" -ForegroundColor Cyan
+foreach ($slot in $slots) {
+    if (-not $slot.Model) { continue }
+    $prefix = Get-ModelPrefix $slot.Model.provider $slot.Model.modelId
+    $think = if ($slot.Model.thinking) { "Yes" } else { "No" }
+    $score = [math]::Round((Get-Score $slot.Model $slot.Weight), 1)
+    $verd  = $slot.Model.verdict
+    $lat   = if ($slot.Model.avgMs -eq 9999.0) { "---" } else { [math]::Round($slot.Model.avgMs) }
+    $runup = Get-PrintableRunnerUp $slot.Json
+    Write-Host ("{0,-10} | {1,-42} | {2,-5} | {3,6} | {4,-7} | {5,7} | {6}" -f $slot.Name, $prefix, $think, $score, $verd, $lat, $runup) -ForegroundColor White
+}
+
+Write-Host ""
+Write-Host "============= SCORE BREAKDOWN ============================" -ForegroundColor Cyan
+Write-Host ("{0,-10} | {1,6} | {2,6} | {3,6} | {4,6} | {5,6}" -f "SLOT", "SWE", "STAB", "LAT", "NIM", "TOTAL") -ForegroundColor DarkGray
+Write-Host "==========================================================" -ForegroundColor Cyan
+foreach ($slot in $slots) {
+    if (-not $slot.Model) { continue }
+    $comps = Get-ScoreComponents $slot.Model $slot.Weight
+    Write-Host ("{0,-10} | {1,6:N1} | {2,6:N1} | {3,6:N1} | {4,6:N1} | {5,6:N1}" -f $slot.Name, $comps.SWE, $comps.Stab, $comps.Lat, $comps.NIM, $comps.Total) -ForegroundColor White
+}
 Write-Host ""
 
 # Build .env
