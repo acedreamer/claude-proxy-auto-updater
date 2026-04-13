@@ -11,7 +11,7 @@
  */
 
 import { createRequire } from 'module'
-import { fileURLToFilePath, pathToFileURL } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import path from 'path'
 import fs from 'fs'
 import { execSync } from 'child_process'
@@ -56,7 +56,7 @@ const TIMEOUT_MS = parseInt(getArg('--timeout') || '15000', 10)
 const filterProvs = (getArg('--providers') || '').split(',').filter(Boolean)
 const filterTiers = (getArg('--tier') || '').split(',').filter(Boolean)
 const MAX_CONCUR = parseInt(getArg('--concurrency') || '12', 10)
-const ENABLE_TOOL_TEST = !hasFlag('--no-tool-test') // R-401: Tool-call probe flag
+const ENABLE_TOOL_TEST = hasFlag('--tool-test') // R-401: Tool-call probe flag
 
 // ============================================================
 // KEY RESOLUTION
@@ -317,6 +317,8 @@ async function main() {
   }
 
   if (candidates.length === 0) {
+    console.error('No candidates found for providers:', Array.from(enabledProviders), 'with tiers:', filterTiers)
+    console.error('API keys present:', Object.keys(KEY_MAP).filter(k => KEY_MAP[k]))
     process.stdout.write('[]\n')
     process.exit(1)
   }

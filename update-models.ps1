@@ -41,31 +41,10 @@ $Config = @{
 }
 
 # ============================================================
-#  MODEL CAPABILITY REGISTRY
-#  toolCallOk: model correctly handles Anthropic tool schemas
-#              through the free-claude-code proxy
-#  thinking:   true = genuine reasoning model needing special params
-#              (deepseek-r1, qwq, kimi-thinking variants)
-#  role:       heavy | balanced | fast
+#  AUTO-DETECTION SETUP
+#  Dynamic model capability detection replaces static registry
 # ============================================================
-$ModelCaps = @{
-    # NVIDIA NIM
-    "nvidia/moonshotai/kimi-k2.5"                         = @{ toolCallOk=$true;  thinking=$false; role="heavy"    }
-    "nvidia/moonshotai/kimi-k2-thinking"                  = @{ toolCallOk=$true;  thinking=$true;  role="heavy"    }
-    "nvidia/z-ai/glm4.7"                                  = @{ toolCallOk=$true;  thinking=$false; role="heavy"    }
-    "nvidia/deepseek-ai/deepseek-v3.2"                    = @{ toolCallOk=$true;  thinking=$false; role="heavy"    }
-    "nvidia/deepseek-ai/deepseek-v3-0324"                 = @{ toolCallOk=$true;  thinking=$false; role="heavy"    }
-    "nvidia/minimaxai/minimax-m2.5"                       = @{ toolCallOk=$true;  thinking=$false; role="heavy"    }
-    "nvidia/meta/llama-3.3-70b-instruct"                  = @{ toolCallOk=$true;  thinking=$false; role="balanced" }
-    "nvidia/meta/llama-3.1-405b-instruct"                 = @{ toolCallOk=$true;  thinking=$false; role="heavy"    }
-    "nvidia/qwen/qwen2.5-coder-32b-instruct"              = @{ toolCallOk=$true;  thinking=$false; role="balanced" }
-    "nvidia/nvidia/llama-3.2-3b-instruct"                 = @{ toolCallOk=$true;  thinking=$false; role="fast"     }
-    "nvidia/nvidia/llama-3.1-8b-instruct"                 = @{ toolCallOk=$true;  thinking=$false; role="fast"     }
-    # OpenRouter
-    "openrouter/deepseek/deepseek-r1:free"                = @{ toolCallOk=$true;  thinking=$true;  role="heavy"    }
-    "openrouter/deepseek/deepseek-r1-0528:free"           = @{ toolCallOk=$true;  thinking=$true;  role="heavy"    }
-    "openrouter/qwen/qwen3.6-plus:free"                   = @{ toolCallOk=$false; thinking=$true;  role="heavy"    }
-}
+# Auto-detection system removed. Using inline logic instead.
 
 # ============================================================
 #  UTILITIES
@@ -151,38 +130,45 @@ function Is-VerdictAllowed {
     return $false
 }
 
-function Get-Role {
-    param($Model)
-    $capKey = Get-CapKey $Model.provider $Model.modelId
-    if ($ModelCaps.ContainsKey($capKey) -and $ModelCaps[$capKey].role) {
-        return $ModelCaps[$capKey].role
-    }
-    return "balanced"
-}
+function Is-ThinkingModel {
+    param([string]$ModelId)
 
-function Get-IsThinking {
-    param($Model)
-    $capKey = Get-CapKey $Model.provider $Model.modelId
-    if ($ModelCaps.ContainsKey($capKey)) {
-        return [bool]$ModelCaps[$capKey].thinking
+    $patterns = @(
+        'deepseek-r1',
+        'kimi-k2-thinking',
+        'qwq',
+        '-thinking$'
+    )
+    foreach ($pattern in $patterns) {
+        if ($ModelId -match [regex]::Escape($pattern)) { return $true }
     }
+    # Also catch exact keyword match without full regex search if needed
+    if ($ModelId -match '\b(thinking|r1)\b|thinking-model|reasoning') { return $true }
     return $false
 }
 
+# Get-IsThinking function removed - thinking models are identified by model ID pattern
+# thinking status is determined by model name containing "thinking" or specific patterns
+
 function Get-ToolCallEffective {
     param($Model)
+
+    # Use probe status if available from fcm-oneshot
     $status = [string]$Model.toolCallProbeStatus
     if ($status -eq "pass") { return $true }
     if ($status -eq "fail") { return $false }
+
+    # If status is not determined and we have explicit toolCallOk, use it
     if ($status -and $status -ne "unknown" -and $null -ne $Model.toolCallOk) {
         return [bool]$Model.toolCallOk
     }
 
-    $capKey = Get-CapKey $Model.provider $Model.modelId
-    if ($ModelCaps.ContainsKey($capKey)) {
-        return [bool]$ModelCaps[$capKey].toolCallOk
+    # Fallback: Tier-based assumption
+    if ($Model.tier -match "^(S\+|S|A\+|A)$") {
+        return $true  # Assume S and A tier support tools
+    } else {
+        return $false # Assume lower tiers don't support tools
     }
-    return $false
 }
 
 function Get-TopCandidates {
@@ -241,6 +227,7 @@ if (Test-Path $cacheFile) {
                 $ageMin = [math]::Round($cacheAge.TotalMinutes)
                 $nextMin = [math]::Round($Config.CacheTTLMinutes - $cacheAge.TotalMinutes)
                 Write-Host "[CACHE] Using ${ageMin}m old data. Refresh in ${nextMin}m." -ForegroundColor Magenta
+
             }
         } catch { }
     }
@@ -309,6 +296,7 @@ if (-not $usingCache) {
         $liveModels | ConvertTo-Json -Depth 5 | Out-File $cacheFile -Encoding utf8
         Set-SecureACL $cacheFile
     } catch { }
+
 }
 
 # ============================================================
@@ -335,11 +323,12 @@ $normalizedModels = @(
             toolCallOk = $_.toolCallOk
             toolCallProbeStatus = if ($_.toolCallProbeStatus) { [string]$_.toolCallProbeStatus } else { "unknown" }
             effectiveToolCallOk = $effectiveTool
-            role = (Get-Role $_)
-            thinking = (Get-IsThinking $_)
+            thinking = (Is-ThinkingModel $_.modelId)
         }
     }
 )
+
+$aliveModels = @($normalizedModels | Where-Object { $_.status -eq "up" })
 
 function Get-Score {
     param($model, [hashtable]$W)
@@ -355,63 +344,63 @@ function Get-Score {
 }
 
 $Weights = @{
-    Opus     = @{ SWE=0.50; Stab=0.25; Lat=0.05; NIM=1.5; LatTarget=800;  LatPenalty=0.02 }
-    Sonnet   = @{ SWE=0.35; Stab=0.25; Lat=0.20; NIM=1.0; LatTarget=400;  LatPenalty=0.05 }
-    Haiku    = @{ SWE=0.10; Stab=0.20; Lat=0.60; NIM=0.5; LatTarget=200;  LatPenalty=0.12 }
-    Fallback = @{ SWE=0.30; Stab=0.40; Lat=0.15; NIM=1.0; LatTarget=500;  LatPenalty=0.04 }
+    Opus     = @{ SWE=0.55; Stab=0.20; Lat=0.05; NIM=1.5; LatTarget=1500; LatPenalty=0.01 }
+    Sonnet   = @{ SWE=0.35; Stab=0.25; Lat=0.25; NIM=1.0; LatTarget=500;  LatPenalty=0.04 }
+    Haiku    = @{ SWE=0.05; Stab=0.15; Lat=0.70; NIM=0.5; LatTarget=200;  LatPenalty=0.12 }
+    Fallback = @{ SWE=0.25; Stab=0.50; Lat=0.10; NIM=1.0; LatTarget=800;  LatPenalty=0.02 }
 }
 
 $opusEligible = @(
-    $normalizedModels | Where-Object {
+    $aliveModels | Where-Object {
         $_.effectiveToolCallOk -and
-        $_.role -eq "heavy" -and
-        (-not $_.thinking) -and
+        -not $_.thinking -and
         (Is-VerdictAllowed -Slot "opus" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
     }
 )
 if ($opusEligible.Count -eq 0) {
-    $opusEligible = @($normalizedModels | Where-Object { $_.effectiveToolCallOk -and $_.role -eq "heavy" -and (-not $_.thinking) })
+    $opusEligible = @($aliveModels | Where-Object { $_.effectiveToolCallOk -and -not $_.thinking })
 }
 $opusCandidate = $opusEligible | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
 if (-not $opusCandidate) {
-    $opusCandidate = $normalizedModels | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
+    $opusCandidate = $aliveModels | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
 }
 
 $sonnetEligible = @(
-    $normalizedModels | Where-Object {
+    $aliveModels | Where-Object {
         $_.modelId -ne $opusCandidate.modelId -and
         $_.effectiveToolCallOk -and
-        $_.role -eq "balanced" -and
+        -not $_.thinking -and
         (Is-VerdictAllowed -Slot "sonnet" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
     }
 )
 if ($sonnetEligible.Count -eq 0) {
-    $sonnetEligible = @($normalizedModels | Where-Object { $_.modelId -ne $opusCandidate.modelId -and $_.effectiveToolCallOk -and $_.role -eq "balanced" })
+    $sonnetEligible = @($aliveModels | Where-Object { $_.modelId -ne $opusCandidate.modelId -and $_.effectiveToolCallOk })
 }
 $sonnetCandidate = $sonnetEligible | Sort-Object { Get-Score $_ $Weights.Sonnet } -Descending | Select-Object -First 1
 if (-not $sonnetCandidate) { $sonnetCandidate = $opusCandidate }
 
 $haikuEligible = @(
-    $normalizedModels | Where-Object {
+    $aliveModels | Where-Object {
         $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) -and
-        $_.role -eq "fast" -and
+        -not $_.thinking -and
         (Is-VerdictAllowed -Slot "haiku" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
     }
 )
 if ($haikuEligible.Count -eq 0) {
-    $haikuEligible = @($normalizedModels | Where-Object { $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) -and $_.role -eq "fast" })
+    $haikuEligible = @($aliveModels | Where-Object { $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) })
 }
 $haikuCandidate = $haikuEligible | Sort-Object { Get-Score $_ $Weights.Haiku } -Descending | Select-Object -First 1
 if (-not $haikuCandidate) { $haikuCandidate = $sonnetCandidate }
 
 $fallbackEligible = @(
-    $normalizedModels | Where-Object {
+    $aliveModels | Where-Object {
+        $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId, $haikuCandidate.modelId) -and
         $_.effectiveToolCallOk -and
         (Is-VerdictAllowed -Slot "fallback" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
     }
 )
 if ($fallbackEligible.Count -eq 0) {
-    $fallbackEligible = @($normalizedModels | Where-Object { $_.effectiveToolCallOk })
+    $fallbackEligible = @($aliveModels | Where-Object { $_.effectiveToolCallOk })
 }
 $fallbackCandidate = $fallbackEligible | Sort-Object { Get-Score $_ $Weights.Fallback } -Descending | Select-Object -First 1
 if (-not $fallbackCandidate) { $fallbackCandidate = $opusCandidate }
