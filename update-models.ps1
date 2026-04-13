@@ -29,7 +29,7 @@ $oneshotScript = Join-Path $PSScriptRoot "fcm-oneshot.mjs"
 $DryRun = ($args -contains '--dry-run') -or ($args -contains '-DryRun')
 
 $Config = @{
-    CacheTTLMinutes = 45      # Minutes before re-running fcm-oneshot
+    CacheTTLMinutes = 0.3      # Minutes before re-running fcm-oneshot
     PingTimeoutMs   = 15000   # Passed to fcm-oneshot --timeout
     Providers       = "nvidia,openrouter"  # Comma list passed to fcm-oneshot --providers
     TierFilter      = "S,A"   # Only S+/S/A+/A/A- tier models
@@ -396,11 +396,12 @@ $fallbackEligible = @(
     $aliveModels | Where-Object {
         $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId, $haikuCandidate.modelId) -and
         $_.effectiveToolCallOk -and
+        -not $_.thinking -and
         (Is-VerdictAllowed -Slot "fallback" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
     }
 )
 if ($fallbackEligible.Count -eq 0) {
-    $fallbackEligible = @($aliveModels | Where-Object { $_.effectiveToolCallOk })
+    $fallbackEligible = @($aliveModels | Where-Object { $_.effectiveToolCallOk -and -not $_.thinking })
 }
 $fallbackCandidate = $fallbackEligible | Sort-Object { Get-Score $_ $Weights.Fallback } -Descending | Select-Object -First 1
 if (-not $fallbackCandidate) { $fallbackCandidate = $opusCandidate }
