@@ -27,6 +27,7 @@ $cacheFile  = Join-Path $PSScriptRoot "model-cache.json"
 $candidatesFile = Join-Path $PSScriptRoot "model-candidates.json"
 $oneshotScript = Join-Path $PSScriptRoot "fcm-oneshot.mjs"
 $DryRun = ($args -contains '--dry-run') -or ($args -contains '-DryRun')
+$ToolTest = ($args -contains '--tool-test')
 
 $Config = @{
     CacheTTLMinutes = 0.3      # Minutes before re-running fcm-oneshot
@@ -261,6 +262,10 @@ if (-not $usingCache) {
         "--tier",      $Config.TierFilter,
         "--timeout",   $Config.PingTimeoutMs
     )
+    if ($ToolTest) {
+        $nodeArgs += "--tool-test"
+        Write-Host "  Tool-call probing: ENABLED" -ForegroundColor Yellow
+    }
 
     $ErrorActionPreference = 'Continue'
     $rawOutput = & node @nodeArgs 2>&1
