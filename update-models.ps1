@@ -420,6 +420,15 @@ try {
     Write-Host "[WARN] Failed to write ${candidatesFile}: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
+Write-Host ""
+Write-Host "======== SELECTED MODELS ========" -ForegroundColor Cyan
+Write-Host "  OPUS     : $(Get-ModelPrefix $opusCandidate.provider $opusCandidate.modelId)" -ForegroundColor White
+Write-Host "  SONNET   : $(Get-ModelPrefix $sonnetCandidate.provider $sonnetCandidate.modelId)" -ForegroundColor White
+Write-Host "  HAIKU    : $(Get-ModelPrefix $haikuCandidate.provider $haikuCandidate.modelId)" -ForegroundColor White
+Write-Host "  FALLBACK : $(Get-ModelPrefix $fallbackCandidate.provider $fallbackCandidate.modelId)" -ForegroundColor White
+Write-Host "=================================" -ForegroundColor Cyan
+Write-Host ""
+
 # Build .env
 $envLines = if (Test-Path $envPath) { Get-Content $envPath } else { @() }
 $newLines = @()
