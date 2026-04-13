@@ -33,7 +33,7 @@ $Config = @{
     CacheTTLMinutes = 0.3      # Minutes before re-running fcm-oneshot
     PingTimeoutMs   = 15000   # Passed to fcm-oneshot --timeout
     Providers       = "nvidia,openrouter"  # Comma list passed to fcm-oneshot --providers
-    TierFilter      = "S,A"   # Only S+/S/A+/A/A- tier models
+    TierFilter      = "S+,S,A+,A"   # Only S+/S/A+/A tier models
     # Verdict gate: only accept these verdicts for tool-sensitive slots
     # Haiku is less strict since it handles lighter tasks
     OpusSonnetVerdicts  = @("Perfect", "Normal")
