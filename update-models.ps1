@@ -420,12 +420,22 @@ try {
     Write-Host "[WARN] Failed to write ${candidatesFile}: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
+$opusScore = [math]::Round((Get-Score $opusCandidate $Weights.Opus), 1)
+$sonnetScore = [math]::Round((Get-Score $sonnetCandidate $Weights.Sonnet), 1)
+$haikuScore = [math]::Round((Get-Score $haikuCandidate $Weights.Haiku), 1)
+$fallbackScore = [math]::Round((Get-Score $fallbackCandidate $Weights.Fallback), 1)
+
+$opusThinking = if ($opusCandidate.thinking) { "Yes" } else { "No" }
+$sonnetThinking = if ($sonnetCandidate.thinking) { "Yes" } else { "No" }
+$haikuThinking = if ($haikuCandidate.thinking) { "Yes" } else { "No" }
+$fallbackThinking = if ($fallbackCandidate.thinking) { "Yes" } else { "No" }
+
 Write-Host ""
 Write-Host "======== SELECTED MODELS ========" -ForegroundColor Cyan
-Write-Host "  OPUS     : $(Get-ModelPrefix $opusCandidate.provider $opusCandidate.modelId)" -ForegroundColor White
-Write-Host "  SONNET   : $(Get-ModelPrefix $sonnetCandidate.provider $sonnetCandidate.modelId)" -ForegroundColor White
-Write-Host "  HAIKU    : $(Get-ModelPrefix $haikuCandidate.provider $haikuCandidate.modelId)" -ForegroundColor White
-Write-Host "  FALLBACK : $(Get-ModelPrefix $fallbackCandidate.provider $fallbackCandidate.modelId)" -ForegroundColor White
+Write-Host "  OPUS     : $(Get-ModelPrefix $opusCandidate.provider $opusCandidate.modelId) (Score: $opusScore | Thinking: $opusThinking)" -ForegroundColor White
+Write-Host "  SONNET   : $(Get-ModelPrefix $sonnetCandidate.provider $sonnetCandidate.modelId) (Score: $sonnetScore | Thinking: $sonnetThinking)" -ForegroundColor White
+Write-Host "  HAIKU    : $(Get-ModelPrefix $haikuCandidate.provider $haikuCandidate.modelId) (Score: $haikuScore | Thinking: $haikuThinking)" -ForegroundColor White
+Write-Host "  FALLBACK : $(Get-ModelPrefix $fallbackCandidate.provider $fallbackCandidate.modelId) (Score: $fallbackScore | Thinking: $fallbackThinking)" -ForegroundColor White
 Write-Host "=================================" -ForegroundColor Cyan
 Write-Host ""
 
