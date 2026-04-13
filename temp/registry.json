@@ -1,0 +1,8 @@
+{
+  "SchemaVersion": "1.0",
+  "Models": {
+    "model1": {
+      "capability": "test"
+    }
+  }
+}

@@ -6,7 +6,15 @@ class CapabilityRegistry {
 
     [void] LoadFromFile([string]$path) {
         if (Test-Path $path) {
-            $data = Get-Content $path | ConvertFrom-Json -AsHashtable
+            if ($global:PSVersionTable.PSVersion.Major -ge 7) {
+                $data = Get-Content $path | ConvertFrom-Json -AsHashtable
+            } else {
+                $json = Get-Content $path -Raw | ConvertFrom-Json
+                $data = @{}
+                foreach ($p in $json.PSObject.Properties) {
+                    $data[$p.Name] = $p.Value
+                }
+            }
             $this.SchemaVersion = $data.SchemaVersion
             $this.Models = $data.Models
         }

@@ -1,5 +1,8 @@
 # RoleDetector Tests
 
+# Import the RoleDetector class
+. "$PSScriptRoot/../../src/auto-detection/RoleDetector.ps1"
+
 Describe "RoleDetector" {
     Context "Initial Role Detection" {
         It "should return 'fast' for small model IDs" {

@@ -20,3 +20,4 @@ performance-cache.json
 # Temp files
 *.tmp
 *~
+performance-cache.json

@@ -2,6 +2,7 @@
 
 # Import the CapabilityRegistry class
 . $PSScriptRoot/../CapabilityRegistry.ps1
+Write-Host "Loaded CapabilityRegistry.ps1 from $PSScriptRoot/../CapabilityRegistry.ps1"
 
 # TDD: Failing test first
 

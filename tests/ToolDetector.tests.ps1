@@ -1,6 +1,6 @@
 Describe "ToolDetector" {
     BeforeAll {
-        . $PSScriptRoot/../src/auto-detection/ToolDetector.ps1
+        . $PSScriptRoot/../../src/auto-detection/ToolDetector.ps1
     }
 
     It "creates valid tool probe" {

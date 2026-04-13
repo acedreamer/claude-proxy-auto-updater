@@ -1,0 +1,25 @@
+{
+  "WindowSize": 10,
+  "LastUpdated": "2026-04-12T08:34:45.8443348Z",
+  "Models": {
+    "model1": {
+      "calculatedScores": {
+        "successRate": 50.0,
+        "stabilityScore": 0.02,
+        "latencyVariance": 9.09
+      },
+      "currentPerformance": {
+        "successWindow": [
+          true,
+          false
+        ],
+        "latencyWindow": [
+          250,
+          300
+        ],
+        "lastProbe": "2026-04-12T08:34:45.8236961Z",
+        "failureCount": 1
+      }
+    }
+  }
+}
