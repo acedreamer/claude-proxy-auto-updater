@@ -1,298 +1,266 @@
-# 🤖 Claude Proxy Auto-Updater v5.0
+# Claude Proxy Auto-Updater
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Requires: Node.js](https://img.shields.io/badge/Requires-Node.js-green.svg)](https://nodejs.org/)
-[![GitHub stars](https://img.shields.io/github/stars/acedreamer/claude-proxy-auto-updater?style=social)](https://github.com/acedreamer/claude-proxy-auto-updater)
+[![Version](https://img.shields.io/badge/version-5.0-blue.svg)](https://github.com/acedreamer/claude-proxy-auto-updater)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE.svg)](https://docs.microsoft.com/powershell/)
+[![Bash](https://img.shields.io/badge/Bash-3.2+-4EAA25.svg)](https://www.gnu.org/software/bash/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A standalone, telemetry-driven auto-updating system designed exclusively for the **[free-claude-code](https://github.com/Alishahryar1/free-claude-code)** proxy.
+> **Intelligent model selection for free-claude-code proxy — automatically picks the best available AI models at startup.**
 
-Version 5.0 introduces **cross-platform bash support**, **transparent scoring with runner-up tracking**, **ranked candidate lists for failover**, and **automatic tool-call detection**.
+## What It Does
 
----
+The Claude Proxy Auto-Updater connects to free AI model providers (NVIDIA NIM and OpenRouter) in real-time, measures actual performance metrics (latency, stability, SWE bench scores), and automatically selects the optimal models for each proxy slot:
 
-## 🌟 Acknowledgments
+- **OPUS** — Heavy reasoning tasks requiring the highest quality
+- **SONNET** — Balanced performance for general coding work
+- **HAIKU** — Fast responses for lightweight queries
+- **FALLBACK** — Reliable backup when primary models are unavailable
 
-This tool exists purely as a bridge between two phenomenal open-source projects:
+## Why Use It?
 
-* **[free-claude-code](https://github.com/Alishahryar1/free-claude-code)** by [@Alishahryar1](https://github.com/Alishahryar1) — The core reverse-engineering proxy.
-* **[free-coding-models](https://github.com/vava-nessa/free-coding-models)** by [@vava-nessa](https://github.com/vava-nessa) — The CLI benchmark utility that provides the telemetry data used for scoring.
+Free AI model availability changes constantly. Instead of manually testing and configuring models every session, this tool:
 
----
+- Measures real-time latency, stability scores, and verdicts (Perfect/Normal/Slow/Spiky/Overloaded)
+- Applies intelligent scoring based on SWE-bench performance, latency, and uptime
+- Automatically promotes/demotes models based on live telemetry
+- Provides transparent score breakdowns so you know *why* each model was selected
+- Works on Windows (PowerShell), Linux, and macOS (Bash)
 
-## ✨ What's New in v5.0
+## Key Features
 
-### 🔷 Cross-Platform Support (M1)
-- **Linux and macOS support** via `update-models.sh` (POSIX-compatible bash)
-- **Windows support** via `update-models.ps1` (PowerShell)
-- Single `.env` format works across all platforms
+| Feature | Description |
+|---------|-------------|
+| Real-Time Telemetry | Pings models via `free-coding-models` to get actual latency, stability, and verdict data |
+| Smart Scoring | Data-driven algorithm weighing SWE-bench scores, stability, latency, and provider bonuses |
+| Auto-Detection | Dynamically detects tool-call support and role classifications without manual registry edits |
+| Cross-Platform | Native PowerShell 5.1+ for Windows, POSIX Bash 3.2+ for Linux/macOS |
+| Score Transparency | Prints detailed score breakdown with runner-up models for every slot |
+| Dry-Run Mode | Preview selections without modifying your `.env` file |
+| Intelligent Caching | Caches results for configurable TTL to reduce startup time from ~30s to ~1s |
+| Graceful Degradation | Works even without `free-coding-models` (latency-only mode) |
 
-### 🔷 Transparency & Score Breakdown (M2)
-- **Why, not just what**: Every run shows detailed score breakdowns
-  - SWE contribution, Stability, Latency, NIM bonus
-  - Verdict classification, average latency
-  - Runner-up model with score delta
-- **Failover ready**: `model-candidates.json` generated with top-3 candidates per slot
+## Installation
 
-### 🔷 Resilience & Auto-Detection (M3)
-- **Graceful degradation**: Works without `free-coding-models` installed (latency-only mode)
-- **Automatic tool-call detection**: Live probes determine `toolCallOk` instead of static registry
-- Clear warnings and actionable instructions when in degraded mode
+### Prerequisites
 
----
-
-## ⚠️ Prerequisites
-
-| Component | Purpose | Fallback if Missing |
-|-----------|---------|---------------------|
-| **Node.js** | Run telemetry helper | Required |
-| **free-coding-models** | Full scoring with verdicts/stability | Latency-only mode |
-| **bash 3.2+** | Linux/macOS support | Windows users use PowerShell |
-
-```bash
-# Optional but recommended
-npm install -g free-coding-models
-```
-
----
-
-## 🚀 Usage Guide
-
-### Platform Support
-
-| Platform | Script | Status | Install Command |
-|----------|--------|--------|-----------------|
-| Windows | `update-models.ps1` | ✅ Available | - |
-| Linux | `update-models.sh` | ✅ Available | `chmod +x update-models.sh` |
-| macOS | `update-models.sh` | ✅ Available | `chmod +x update-models.sh` |
+- **Windows**: PowerShell 5.1 or later (included in Windows 10+)
+- **Linux/macOS**: Bash 3.2 or later
+- **Node.js**: 16+ (required for `fcm-oneshot.mjs`)
 
 ### Quick Start
 
-1. **Download** the files for your platform:
-   - Windows: `update-models.ps1` + `fcm-oneshot.mjs`
-   - Linux/macOS: `update-models.sh` + `fcm-oneshot.mjs`
-
-2. **Place** into your `free-claude-code` root folder (where `.env` is)
-
-3. **Configure** API keys in `.env`:
+1. **Clone the repository:**
    ```bash
-   NVIDIA_NIM_API_KEY=your_key_here
-   OPENROUTER_API_KEY=your_key_here
+   git clone https://github.com/acedreamer/claude-proxy-auto-updater.git
+   cd claude-proxy-auto-updater
    ```
 
-4. **Run** the script:
+2. **Install free-coding-models (optional but recommended):**
+   ```bash
+   npm install -g free-coding-models
+   ```
 
-#### Windows (PowerShell)
+3. **Configure your API keys:**
+   Create a `.env` file with your API keys:
+   ```bash
+   NVIDIA_NIM_API_KEY="your-nvidia-nim-key"
+   OPENROUTER_API_KEY="your-openrouter-key"
+   ```
+
+### Platform-Specific Setup
+
+#### Windows
+
 ```powershell
+# Run directly
 .\update-models.ps1
+
+# Or with dry-run to preview changes
+.\update-models.ps1 -DryRun
 ```
 
-Or integrate into `start_server.bat`:
-```bat
-@echo off
-echo Running model update script...
-powershell.exe -ExecutionPolicy Bypass -File "%~dp0update-models.ps1"
-uv run uvicorn server:app --host 0.0.0.0 --port 8082
-pause
-```
+#### Linux / macOS
 
-#### Linux / macOS (Bash)
 ```bash
+# Make executable (first time only)
 chmod +x update-models.sh
+
+# Run
 ./update-models.sh
-```
 
-Or integrate into a startup script:
-```bash
-#!/bin/bash
-echo "Running model update script..."
-./update-models.sh
-uv run uvicorn server:app --host 0.0.0.0 --port 8082
-```
-
----
-
-## 🧪 Dry Run Mode
-
-Preview changes without modifying `.env`:
-
-```powershell
-# Windows
-.\update-models.ps1 --dry-run
-
-# Linux/macOS
+# Or with dry-run
 ./update-models.sh --dry-run
 ```
 
-Output shows exactly what would be updated, including:
-- Selected models for each slot
-- Score breakdowns
-- `NIM_ENABLE_THINKING` setting
+## Usage
 
----
+### Basic Usage
 
-## 🧮 How Scoring Works
+The script automatically updates your `.env` file with the best available models:
 
-The v5 engine uses four weighted profiles:
+```powershell
+# Windows
+.\update-models.ps1
 
-| Slot | Weight Profile | Best For | Priority |
-|------|---------------|----------|----------|
-| 🧠 **OPUS** | SWE: 50%, Stab: 25%, Lat: 5%, NIM: 1.5x | Complex tasks | High SWE + tool support |
-| ⚖️ **SONNET** | SWE: 35%, Stab: 25%, Lat: 20%, NIM: 1.0x | Daily coding | Balanced |
-| ⚡ **HAIKU** | SWE: 10%, Stab: 20%, Lat: 60%, NIM: 0.5x | Fast responses | Sub-200ms latency |
-| 🛡️ **FALLBACK** | SWE: 30%, Stab: 40%, Lat: 15%, NIM: 1.0x | Always available | Highest stability |
+# Linux/macOS
+./update-models.sh
+```
+
+### Command-Line Options
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` or `-DryRun` | Preview scores and selections without modifying `.env` |
+| `--tool-test` | Enable tool-call probing for new model validation |
 
 ### Example Output
 
 ```
-============= MODEL SELECTION ============================
-SLOT       | MODEL                                | SCORE  | VERDICT | LAT(ms) | Runner-up
-==========================================================================================
-OPUS       | nvidia_nim/deepseek-v3-0324        |   87.4 | Normal  |    450 | kimi-k2.5 (Δ-3)
-SONNET     | open_router/deepseek-r1:free         |   74.1 | Normal  |    380 | deepseek-v3 (Δ-5)
-HAIKU      | nvidia_nim/llama-3.1-8b-instruct   |   58.2 | Normal  |    180 | llama-3.2-3b (Δ-2)
-FALLBACK   | nvidia_nim/deepseek-v3-0324        |   82.3 | Normal  |    450 | none
+============= MODEL SELECTION ===========================================================================
+SLOT       | MODEL                                      | THINK |  SCORE | VERDICT | LAT(ms) | Runner-up
+=========================================================================================================
+OPUS       | nvidia_nim/nvidia/deepseek-ai/deepseek-v3-0324 | No  |   87.4 | Normal  |     824 | kimi-k2.5 (d-3.1)
+SONNET     | open_router/deepseek/deepseek-r1:free      | Yes   |   74.1 | Normal  |    1342 | deepseek-v3 (d-5.9)
+HAIKU      | nvidia_nim/nvidia/nvidia/llama-3.2-3b-instruct | No  |   92.3 | Perfect |     156 | llama-3.1-8b (d-8.2)
+FALLBACK   | nvidia_nim/nvidia/meta/llama-3.1-405b-instruct | No  |   78.9 | Normal  |     612 | glm4.7 (d-4.3)
 
 ============= SCORE BREAKDOWN ============================
 SLOT       |    SWE |   STAB |    LAT |    NIM |  TOTAL
 ==========================================================
 OPUS       |   42.5 |   18.1 |    4.2 |   12.0 |   87.4
 SONNET     |   29.0 |   15.0 |   11.3 |    0.0 |   74.1
-HAIKU      |    8.0 |   12.0 |   30.0 |    0.0 |   58.2
-FALLBACK   |   25.0 |   40.0 |    9.0 |    0.0 |   82.3
+HAIKU      |    5.2 |   12.8 |   65.3 |    4.0 |   92.3
+FALLBACK   |   22.1 |   42.5 |    6.3 |    8.0 |   78.9
+
+[OK] .env updated via fcm-oneshot telemetry.
 ```
 
----
+## Configuration
 
-## 📁 Failover with model-candidates.json
+All configuration options are at the top of each script:
 
-Each run generates `model-candidates.json` alongside the `.env`:
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `CacheTTLMinutes` | 45 | How long to use cached model data before refreshing |
+| `PingTimeoutMs` | 15000 | Timeout per model ping (milliseconds) |
+| `Providers` | `nvidia,openrouter` | Comma-separated list of providers to query |
+| `TierFilter` | `S+,S,A+,A` | Minimum quality tier to consider |
 
-```json
-{
-  "opus": [
-    {"idx": 0, "model": "deepseek-v3-0324", "prefix": "nvidia_nim/deepseek-ai/deepseek-v3-0324", "score": 87.4, "verdict": "Normal"},
-    {"idx": 3, "model": "kimi-k2.5", "prefix": "nvidia_nim/moonshotai/kimi-k2.5", "score": 84.3, "verdict": "Normal"},
-    {"idx": 1, "model": "deepseek-v3.2", "prefix": "nvidia_nim/deepseek-ai/deepseek-v3.2", "score": 82.1, "verdict": "Normal"}
-  ],
-  "sonnet": [...],
-  "haiku": [...],
-  "fallback": [...]
-}
+### Scoring Weights
+
+The scoring algorithm balances four factors:
+
+| Slot | SWE | Stability | Latency | NIM Bonus |
+|------|-----|-----------|---------|-----------|
+| OPUS | 0.55 | 0.20 | 0.05 | 1.5 |
+| SONNET | 0.35 | 0.25 | 0.25 | 1.0 |
+| HAIKU | 0.05 | 0.15 | 0.70 | 0.5 |
+| FALLBACK | 0.25 | 0.50 | 0.10 | 1.0 |
+
+NVIDIA NIM models receive a bonus due to generally better availability and performance.
+
+### Customizing Weights
+
+Edit the `$Weights` hash table in `update-models.ps1` (or the `init_weights` function in `update-models.sh`) to adjust scoring priorities for your use case.
+
+## Testing
+
+Run the test suite to verify functionality:
+
+```powershell
+# Windows - run all tests
+.\run-tests.ps1
+
+# Or specific test files
+.\run-tests-fixed.ps1
+.\run-tests-final.ps1
 ```
 
-This enables proxy-side failover to #2 or #3 if the primary model degrades.
+Individual test files are located in:
+- `tests/` — Core module tests
+- `tests/auto-detection/` — Auto-detection system tests
+- `src/auto-detection/tests/` — Component unit tests
 
----
-
-## ♻️ Graceful Degradation
-
-If `free-coding-models` is not installed:
-
-```
-[fcm-oneshot] DEGRADED MODE: free-coding-models not found.
- Install for full features: npm install -g free-coding-models
- Continuing with latency-only HTTP pings...
-
-[WARN] free-coding-models not found. Install with: npm install -g free-coding-models for full scoring.
-```
-
-The script continues with:
-- Direct HTTP ping (no verdict/stability data)
-- Latency-only scoring
-- `verdict: "Unknown"`, `stability: null`
-- Still produces valid `.env` update
-
----
-
-## 🛠️ Architecture
-
-```
-                    ┌─────────────────────────────────────┐
-                    │      Claude Proxy Auto-Updater      │
-                    │              v5.0                     │
-                    └─────────────────────────────────────┘
-                                      │
-           ┌──────────────────────────┼──────────────────────────┐
-           ▼                          ▼                          ▼
-   ┌──────────────┐         ┌──────────────────┐      ┌──────────────┐
-   │ update-models│         │  fcm-oneshot.mjs │      │ update-models│
-   │      .sh     │         │  (Node.js helper)│      │     .ps1     │
-   └──────────────┘         └──────────────────┘      └──────────────┘
-         │                            │
-         └────────────────────────────┘
-                      │
-         ┌────────────┴────────────┐
-         ▼                         ▼
-┌─────────────────────┐   ┌───────────────────┐
-│ FULL MODE (fcm      │   │ DEGRADED MODE     │
-│ installed)          │   │ (direct HTTP)     │
-│ • Real telemetry      │   │ • Latency only    │
-│ • Stability scores    │   │ • Unknown verdict │
-│ • Verdicts            │   │ • Still works     │
-│ • Tool-call probes    │   │                   │
-└─────────────────────┘   └───────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────┐
-│ Providers: NVIDIA NIM + OpenRouter (Free) │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## 🔐 Security
-
-- **Local Execution**: No API keys sent to external servers
-- **Telemetry Isolation**: Keys passed only to configured inference endpoints
-- **Cleanup**: API keys unset from memory immediately after use
-- **No Data Retention**: `model-cache.json` is local-only, `.gitignore`-d
-
----
-
-## 📝 Project Structure
+## Project Structure
 
 ```
 claude-proxy-auto-updater/
-├── README.md                 # This file
-├── PRD.md                    # Product Requirements Document
-├── update-models.sh          # Linux/macOS entry point (M1)
-├── update-models.ps1         # Windows entry point
-├── fcm-oneshot.mjs           # Node.js telemetry helper (M3)
-├── tests/
-│   └── update-models.sh.test # Unit tests for bash functions
-├── .env                      # Your API keys (never commit!)
-├── .gitignore               # Ignores .env, model-cache.json
-├── model-cache.json         # Cached telemetry (auto-generated)
-└── model-candidates.json    # Top-3 candidates per slot (M2)
+├── update-models.ps1          # Main PowerShell script (Windows)
+├── update-models.sh             # Main Bash script (Linux/macOS)
+├── fcm-oneshot.mjs              # Node.js model pinger
+├── .env                         # Your API keys (not committed)
+├── model-cache.json             # Cached model data (auto-generated)
+├── model-candidates.json        # Top-3 candidates per slot (auto-generated)
+├── src/
+│   └── auto-detection/          # Auto-detection modules
+│       ├── AutoDetectionManager.ps1
+│       ├── CapabilityRegistry.ps1
+│       ├── PerformanceCache.ps1
+│       ├── RoleDetector.ps1
+│       ├── SafetyManager.ps1
+│       └── ToolDetector.ps1
+├── tests/                       # Test suite
+│   ├── auto-detection/
+│   └── *.tests.ps1
+└── docs/                        # Documentation
+    ├── auto-detection-README.md
+    └── superpowers/plans/       # Architecture plans
 ```
 
+## Contributing
+
+Contributions are welcome. Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Ensure your changes:
+- Maintain PowerShell 5.1 compatibility
+- Maintain Bash 3.2 compatibility
+- Include appropriate tests
+- Update documentation as needed
+
+## Troubleshooting
+
+### "No API keys in .env"
+Create a `.env` file with at least one provider key:
+```bash
+NVIDIA_NIM_API_KEY="your-key-here"
+# or
+OPENROUTER_API_KEY="your-key-here"
+```
+
+### "Node.js not found"
+Install Node.js 16+ from [nodejs.org](https://nodejs.org/)
+
+### "free-coding-models not found"
+The script falls back to degraded mode (latency-only). Install the package for full functionality:
+```bash
+npm install -g free-coding-models
+```
+
+### Cache Issues
+Delete `model-cache.json` to force a fresh fetch:
+```bash
+rm model-cache.json  # Linux/macOS
+Remove-Item model-cache.json  # PowerShell
+```
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- Built for the [free-claude-code](https://github.com/abetlen/free-claude-code) community
+- Leverages [free-coding-models](https://www.npmjs.com/package/free-coding-models) for telemetry
+- Special thanks to NVIDIA NIM and OpenRouter for providing free model endpoints
+
 ---
 
-## ✅ Compliance
+**Maintained by:** [@acedreamer](https://github.com/acedreamer)
 
-| Requirement | Status | Note |
-|-------------|--------|------|
-| R-101 Cross-platform bash | ✅ | `update-models.sh` on Linux/macOS |
-| R-102 fcm-oneshot universal | ✅ | Works on all platforms |
-| R-201 Score breakdown | ✅ | Detailed component output |
-| R-203 Runner-up tracking | ✅ | Δ shown per slot |
-| R-301 Candidates JSON | ✅ | Top-3 per slot, valid JSON |
-| R-401 Tool-call probe | ✅ | Minimal request, 1s budget |
-| R-501 Degraded mode | ✅ | Works without fcm installed |
-| R-503 Degraded warning | ✅ | Install instructions shown |
-
----
-
-## 🙏 Contributing
-
-This project directly implements the PRD specifications. Feature requests should align with:
-
-1. **G1-G5 goals** from the PRD
-2. **P0/P1 priorities** as documented
-3. **Success metrics** (≤3 setup steps, 0 manual registry edits)
-
----
-
-## 📜 License
-
-MIT © 2025 acedreamer
+**Repository:** [acedreamer/claude-proxy-auto-updater](https://github.com/acedreamer/claude-proxy-auto-updater)
