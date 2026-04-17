@@ -21,3 +21,6 @@ performance-cache.json
 *.tmp
 *~
 performance-cache.json
+
+# Git Worktrees
+.worktrees/
