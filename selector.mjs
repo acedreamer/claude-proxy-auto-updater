@@ -35,6 +35,20 @@ export async function readConfig(configPath) {
   return config;
 }
 
+export function calculateScore(model, weights, isPinned = false) {
+  const avgMs = model.avgMs || 9999.0;
+  const latScore = Math.max(0, Math.min(100, 100 - ((avgMs - weights.target_lat) * weights.penalty)));
+  
+  const sweScore = model.swe || 0;
+  const stability = model.stability || 30.0;
+  const nimBonus = model.provider === 'nvidia' ? 8 : 0;
+  
+  let score = (sweScore * weights.swe) + (stability * weights.stab) + (latScore * weights.lat) + (nimBonus * weights.nim);
+  if (isPinned) score += 1000;
+  
+  return Math.round(score * 10) / 10; // Round to 1 decimal place
+}
+
 function mergeDeep(target, source) {
   for (const key in source) {
     if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
