@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG = {
     timeout_ms: 15000
   },
   preferences: {
+    show_insights: true,
     pins: { opus: null, sonnet: null, haiku: null },
     bans: []
   },
@@ -25,6 +26,9 @@ export const DEFAULT_CONFIG = {
 
 export async function readConfig(configPath) {
   let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  if (!configPath) {
+    return config;
+  }
   try {
     const data = await fs.readFile(configPath, 'utf8');
     const userConfig = JSON.parse(data);
@@ -32,7 +36,11 @@ export async function readConfig(configPath) {
   } catch (err) {
     // Missing or invalid, just use defaults
   }
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  try {
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  } catch (err) {
+    // Ignore write errors if path is invalid
+  }
   return config;
 }
 
@@ -89,15 +97,30 @@ export function isEligible(model, slot, config) {
   return true;
 }
 
+export function getShortName(provider, modelId) {
+  const parts = modelId.split('/');
+  const lastPart = parts[parts.length - 1];
+  const baseName = lastPart.split(':')[0];
+  return `${baseName}(${provider})`;
+}
+
+const SLOT_EXPLAINERS = {
+  opus: "High-intelligence role. Focused on SWE-bench scores (55%) and stability. Non-reasoning models preferred for direct code output.",
+  sonnet: "Balanced coding role. Mix of speed and quality (35% SWE). Standard for daily development tasks.",
+  haiku: "Fast response role. Heavily weighted for low latency (70%) and stability. Optimized for lightweight queries.",
+  fallback: "Reliability anchor. Prioritizes uptime and stability (50%) to ensure proxy connectivity if primary models fail."
+};
+
 export function assignSlots(models, config) {
-  const result = { slots: {}, is_degraded: false, is_thinking: false };
+  const result = { slots: {}, is_degraded: false, is_thinking: false, global_insights: config.preferences.show_insights };
   const assigned = new Set();
   
   // Pre-process all models once
   const processedModels = models.map(m => ({
     ...m,
     effectiveToolCallOk: getToolCallEffective(m),
-    thinking: isThinkingModel(m.modelId)
+    thinking: isThinkingModel(m.modelId),
+    shortName: getShortName(m.provider, m.modelId)
   }));
   
   const slots = ['opus', 'sonnet', 'haiku', 'fallback'];
@@ -127,9 +150,14 @@ export function assignSlots(models, config) {
     
     if (scored.length > 0) {
       const winner = scored[0];
+      const runner_up = scored[1] || null;
+      
+      const insight = `[${slot.toUpperCase()}] ${SLOT_EXPLAINERS[slot]} Selected ${winner.shortName} (Score: ${winner.score}).`;
+      
       result.slots[slot] = {
         winner,
-        runner_up: scored[1] || null,
+        runner_up,
+        insight,
         breakdown: scored.slice(0, 3)
       };
       if (slot !== 'fallback') assigned.add(winner.modelId);

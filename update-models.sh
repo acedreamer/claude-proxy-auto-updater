@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Claude Proxy Auto-Updater v6.0 - Bash Edition
+# Claude Proxy Auto-Updater v6.1 - Bash Edition
 # acedreamer/claude-proxy-auto-updater
 #
-# Refactored to delegate selection logic to selector.mjs
+# UX Polish & Centralized Brain (v6.0+)
 
 set -euo pipefail
 
@@ -13,6 +13,7 @@ set -euo pipefail
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ENV_PATH="${SCRIPT_DIR}/.env"
 readonly CACHE_FILE="${SCRIPT_DIR}/model-cache.json"
+readonly CONFIG_FILE="${SCRIPT_DIR}/config.json"
 readonly ONESHOT_SCRIPT="${SCRIPT_DIR}/fcm-oneshot.mjs"
 readonly SELECTOR_SCRIPT="${SCRIPT_DIR}/selector.mjs"
 
@@ -117,7 +118,16 @@ main() {
         [[ "$arg" == "--tool-test" ]] && tool_test=true
     done
 
-    # 1. LOAD KEYS
+    # 1. LOAD CONFIG
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # Simple extraction for bash settings
+        CACHE_TTL_MINUTES=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8')).general.cache_ttl_minutes || 15)")
+        PROVIDERS=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8')).general.providers || 'nvidia,openrouter')")
+        TIER_FILTER=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8')).general.tier_filter || 'S+,S,A+,A')")
+        PING_TIMEOUT_MS=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8')).general.timeout_ms || 15000)")
+    fi
+
+    # 2. LOAD KEYS
     local nim_key="" or_key=""
     while IFS='=' read -r key value; do
         if [[ "$key" == "NVIDIA_NIM_API_KEY" ]]; then nim_key="$value"; fi
@@ -132,7 +142,7 @@ main() {
     [[ -n "$nim_key" ]] && export NVIDIA_API_KEY="$nim_key"
     [[ -n "$or_key" ]] && export OPENROUTER_API_KEY="$or_key"
 
-    # 2. RUN PINGS IF NEEDED
+    # 3. RUN PINGS IF NEEDED
     if ! check_cache; then
         log_banner "PINGING MODELS VIA FREE-CODING-MODELS" "$CYAN"
 
@@ -190,7 +200,7 @@ main() {
         echo ""
         printf "  ${DARKGRAY}%-54s %-10s %-8s %-8s %s${NC}\n" "MODEL" "VERDICT" "AVG" "STAB" "TIER"
         echo "$json_output" | node -e '
-            const models = JSON.parse(fs.readFileSync(0, "utf8"));
+            const models = JSON.parse(require("fs").readFileSync(0, "utf8"));
             models.forEach(m => {
                 const tag = m.status === "up" ? "[OK]" : "[XX]";
                 const avg = m.avgMs ? m.avgMs + "ms" : "---";
@@ -202,7 +212,7 @@ main() {
         echo ""
     fi
 
-    # 3. DELEGATE TO selector.mjs
+    # 4. DELEGATE TO selector.mjs
     echo -e "  Selecting best models for each slot..."
     local selection_result
     selection_result=$(node "$SELECTOR_SCRIPT") || {
@@ -210,42 +220,71 @@ main() {
         exit 1
     }
 
-    # 4. UI LAYER: MODEL SELECTION
+    # 5. INSIGHTS
+    local show_insights
+    show_insights=$(node -e "
+        const fs=require('fs');
+        if(!fs.existsSync('$CONFIG_FILE')){ console.log('null'); process.exit(0); }
+        const c=JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
+        console.log(c.preferences && c.preferences.show_insights !== undefined ? c.preferences.show_insights : 'null');
+    ")
+
+    if [[ "$show_insights" != "false" ]]; then
+        echo ""
+        log_banner "SELECTION INSIGHTS" "$YELLOW"
+        echo "$selection_result" | node -e "
+            const res = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            ['opus','sonnet','haiku','fallback'].forEach(s => {
+                if(res.slots[s] && res.slots[s].insight) console.log('  ' + res.slots[s].insight);
+            });
+        "
+        echo -e "${YELLOW}$(printf '=%.0s' {1..54})${NC}"
+    fi
+
+    # First-run prompt for insights
+    if [[ "$show_insights" == "null" && "$dry_run" == "false" ]]; then
+        echo ""
+        read -p "Selection insights are now enabled. Keep seeing them? [Y/n] " -n 1 -r
+        echo ""
+        local choice="true"
+        [[ $REPLY =~ ^[Nn]$ ]] && choice="false"
+        node -e "const fs=require('fs'); const c=JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8')); c.preferences.show_insights=$choice; fs.writeFileSync('$CONFIG_FILE', JSON.stringify(c, null, 2));"
+    fi
+
+    # 6. UI LAYER: MODEL SELECTION
     echo ""
     echo -e "${CYAN}============= MODEL SELECTION ===========================================================================${NC}"
-    printf "${DARKGRAY}%-10s | %-42s | %-5s | %-6s | %-7s | %-7s | %s${NC}\n" "SLOT" "MODEL" "THINK" "SCORE" "VERDICT" "LAT(ms)" "Runner-up"
+    printf "${DARKGRAY}%-10s | %-38s | %-5s | %-6s | %-7s | %-7s | %s${NC}\n" "SLOT" "MODEL (Short)" "THINK" "SCORE" "VERDICT" "LAT(ms)" "Runner-up"
     echo -e "${CYAN}=========================================================================================================${NC}"
 
     echo "$selection_result" | node -e '
-        const res = JSON.parse(fs.readFileSync(0, "utf8"));
+        const res = JSON.parse(require("fs").readFileSync(0, "utf8"));
         const slots = ["opus", "sonnet", "haiku", "fallback"];
         slots.forEach(sn => {
             const s = res.slots[sn];
             if (!s || !s.winner) return;
             const w = s.winner;
-            const prefix = (w.provider === "nvidia" ? "nvidia_nim/" : w.provider === "openrouter" ? "open_router/" : w.provider + "/") + w.modelId;
+            const name = w.shortName;
             const think = w.thinking ? "Yes" : "No";
             const score = w.score.toFixed(1);
             const lat = w.avgMs === 9999 ? "---" : Math.round(w.avgMs);
             let runup = "none";
             if (s.runner_up) {
-                let rName = s.runner_up.modelId.split("/").pop();
-                if (rName.length > 15) rName = rName.substring(0, 15) + "..";
                 const diff = (w.score - s.runner_up.score).toFixed(1);
-                runup = `${rName} (d-${diff})`;
+                runup = `${s.runner_up.shortName} (d-${diff})`;
             }
-            process.stdout.write(`${sn.toUpperCase().padEnd(10)} | ${prefix.padEnd(42)} | ${think.padEnd(5)} | ${score.padStart(6)} | ${w.verdict.padEnd(7)} | ${String(lat).padStart(7)} | ${runup}\n`);
+            process.stdout.write(`${sn.toUpperCase().padEnd(10)} | ${name.padEnd(38)} | ${think.padEnd(5)} | ${score.padStart(6)} | ${w.verdict.padEnd(7)} | ${String(lat).padStart(7)} | ${runup}\n`);
         });
     '
 
-    # 5. UI LAYER: SCORE BREAKDOWN
+    # 7. UI LAYER: SCORE BREAKDOWN
     echo ""
     echo -e "${CYAN}============= SCORE BREAKDOWN ============================${NC}"
     printf "${DARKGRAY}%-10s | %6s | %6s | %6s | %6s | %6s${NC}\n" "SLOT" "SWE" "STAB" "LAT" "NIM" "TOTAL"
     echo -e "${CYAN}==========================================================${NC}"
 
     echo "$selection_result" | node -e '
-        const res = JSON.parse(fs.readFileSync(0, "utf8"));
+        const res = JSON.parse(require("fs").readFileSync(0, "utf8"));
         const slots = ["opus", "sonnet", "haiku", "fallback"];
         slots.forEach(sn => {
             const s = res.slots[sn];
@@ -257,16 +296,16 @@ main() {
     '
     echo ""
 
-    # 6. UPDATE .env
+    # 8. UPDATE .env
     local is_thinking
-    is_thinking=$(echo "$selection_result" | node -e 'console.log(JSON.parse(fs.readFileSync(0, "utf8")).is_thinking)')
+    is_thinking=$(echo "$selection_result" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).is_thinking)')
     
     # Extract winner prefixes for each slot
     local opus_p sonnet_p haiku_p fallback_p
-    opus_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(fs.readFileSync(0, "utf8")); const w=r.slots.opus.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
-    sonnet_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(fs.readFileSync(0, "utf8")); const w=r.slots.sonnet.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
-    haiku_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(fs.readFileSync(0, "utf8")); const w=r.slots.haiku.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
-    fallback_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(fs.readFileSync(0, "utf8")); const w=r.slots.fallback.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
+    opus_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(require("fs").readFileSync(0, "utf8")); const w=r.slots.opus.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
+    sonnet_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(require("fs").readFileSync(0, "utf8")); const w=r.slots.sonnet.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
+    haiku_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(require("fs").readFileSync(0, "utf8")); const w=r.slots.haiku.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
+    fallback_p=$(echo "$selection_result" | node -e 'const r=JSON.parse(require("fs").readFileSync(0, "utf8")); const w=r.slots.fallback.winner; if(!w){process.exit(0);} console.log((w.provider==="nvidia"?"nvidia_nim/":w.provider==="openrouter"?"open_router/":w.provider+"/")+w.modelId)')
 
     if [[ "$dry_run" == "true" ]]; then
         log_warn "[DRY RUN] .env not modified"
@@ -274,12 +313,8 @@ main() {
         # Update .env file robustly
         local temp_env="${ENV_PATH}.tmp"
         touch "$ENV_PATH"
-        
-        # Read and update/append
         {
-            # Track which ones we updated
             local up_opus=0 up_sonnet=0 up_haiku=0 up_fallback=0 up_thinking=0
-            
             while IFS= read -r line || [[ -n "$line" ]]; do
                 if [[ "$line" =~ ^[[:space:]]*MODEL_OPUS= ]]; then
                     [[ -n "$opus_p" ]] && echo "MODEL_OPUS=\"$opus_p\"" && up_opus=1
@@ -295,19 +330,17 @@ main() {
                     echo "$line"
                 fi
             done < "$ENV_PATH"
-            
             [[ $up_opus -eq 0 && -n "$opus_p" ]] && echo "MODEL_OPUS=\"$opus_p\""
             [[ $up_sonnet -eq 0 && -n "$sonnet_p" ]] && echo "MODEL_SONNET=\"$sonnet_p\""
             [[ $up_haiku -eq 0 && -n "$haiku_p" ]] && echo "MODEL_HAIKU=\"$haiku_p\""
             [[ $up_fallback -eq 0 && -n "$fallback_p" ]] && echo "MODEL=\"$fallback_p\""
             [[ $up_thinking -eq 0 ]] && echo "NIM_ENABLE_THINKING=$is_thinking"
         } > "$temp_env"
-        
         mv "$temp_env" "$ENV_PATH"
         log_info ".env updated via fcm-oneshot telemetry."
     fi
 
-    # 7. CLEANUP
+    # 9. CLEANUP
     unset NVIDIA_API_KEY
     unset OPENROUTER_API_KEY
 }
