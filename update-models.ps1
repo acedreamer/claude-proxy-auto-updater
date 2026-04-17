@@ -2,8 +2,10 @@
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
-#  Claude Proxy Auto-Updater  v4.0
+#  Claude Proxy Auto-Updater  v6.0
 #  acedreamer/claude-proxy-auto-updater
+#
+#  Refactored to delegate selection logic to selector.mjs
 #
 #  Uses free-coding-models internals (fcm-oneshot.mjs) for:
 #    - Real latency measurement (actual inference pings)
@@ -13,12 +15,6 @@ $ErrorActionPreference = 'Stop'
 #
 #  This is far more accurate than the previous runspace HTTP health
 #  checks because it uses the SAME ping logic as free-coding-models.
-#
-#  SLOT RULES:
-#    OPUS     -> toolCallOk required, heavy role, verdict Normal or better
-#    SONNET   -> toolCallOk required, balanced, any good verdict
-#    HAIKU    -> fast role, toolCallOk NOT required, lowest latency
-#    FALLBACK -> toolCallOk required, highest stability score
 # ============================================================
 
 $envPath    = Join-Path $PSScriptRoot ".env"
@@ -91,11 +87,6 @@ function Get-ModelPrefix {
     }
 }
 
-function Get-CapKey {
-    param([string]$Provider, [string]$ModelId)
-    return "$Provider/$ModelId"
-}
-
 function Extract-JsonArrayFromText {
     param([string]$Text)
     if (-not $Text) { return $null }
@@ -113,85 +104,6 @@ function Extract-JsonArrayFromText {
         }
     }
     return $null
-}
-
-function Is-VerdictAllowed {
-    param(
-        [string]$Slot,
-        [string]$Verdict,
-        [bool]$IsDegraded
-    )
-    if ($IsDegraded) { return $true }
-    switch ($Slot) {
-        "opus"     { return $Config.OpusSonnetVerdicts -contains $Verdict }
-        "sonnet"   { return $Config.OpusSonnetVerdicts -contains $Verdict }
-        "haiku"    { return $Config.HaikuVerdicts -contains $Verdict }
-        "fallback" { return $Config.FallbackVerdicts -contains $Verdict }
-    }
-    return $false
-}
-
-function Is-ThinkingModel {
-    param([string]$ModelId)
-
-    $patterns = @(
-        'deepseek-r1',
-        'kimi-k2-thinking',
-        'qwq',
-        '-thinking$'
-    )
-    foreach ($pattern in $patterns) {
-        if ($ModelId -match [regex]::Escape($pattern)) { return $true }
-    }
-    # Also catch exact keyword match without full regex search if needed
-    if ($ModelId -match '\b(thinking|r1)\b|thinking-model|reasoning') { return $true }
-    return $false
-}
-
-# Get-IsThinking function removed - thinking models are identified by model ID pattern
-# thinking status is determined by model name containing "thinking" or specific patterns
-
-function Get-ToolCallEffective {
-    param($Model)
-
-    # Use probe status if available from fcm-oneshot
-    $status = [string]$Model.toolCallProbeStatus
-    if ($status -eq "pass") { return $true }
-    if ($status -eq "fail") { return $false }
-
-    # If status is not determined and we have explicit toolCallOk, use it
-    if ($status -and $status -ne "unknown" -and $null -ne $Model.toolCallOk) {
-        return [bool]$Model.toolCallOk
-    }
-
-    # Fallback: Tier-based assumption
-    if ($Model.tier -match "^(S\+|S|A\+|A)$") {
-        return $true  # Assume S and A tier support tools
-    } else {
-        return $false # Assume lower tiers don't support tools
-    }
-}
-
-function Get-TopCandidates {
-    param(
-        [array]$Models,
-        [hashtable]$Weight,
-        [int]$Top = 3
-    )
-    return $Models |
-        Sort-Object { Get-Score $_ $Weight } -Descending |
-        Select-Object -First $Top |
-        ForEach-Object {
-            [PSCustomObject]@{
-                model = $_.modelId
-                prefix = (Get-ModelPrefix $_.provider $_.modelId)
-                score = [math]::Round((Get-Score $_ $Weight), 1)
-                verdict = $_.verdict
-                avgMs = $_.avgMs
-                stability = $_.stability
-                toolCallOk = $_.effectiveToolCallOk
-            }
-        }
 }
 
 # ============================================================
@@ -305,198 +217,87 @@ if (-not $usingCache) {
 }
 
 # ============================================================
-#  SCORING & ASSIGNMENT
+#  DELEGATE SELECTION TO selector.mjs
 # ============================================================
-$script:IsDegraded = @($liveModels | Where-Object { $_.degraded -eq $true }).Count -gt 0
-if ($script:IsDegraded) {
-    Write-Host "[WARN] free-coding-models not found. Install with: npm install -g free-coding-models for full scoring." -ForegroundColor Yellow
+Write-Host "  Selecting best models for each slot..." -ForegroundColor White
+
+$selectorScript = Join-Path $PSScriptRoot "selector.mjs"
+$selectorOutput = & node $selectorScript 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $selectorOutput) {
+    Write-Host "[ERROR] selector.mjs failed or returned no output." -ForegroundColor Red
+    exit 1
 }
 
-$normalizedModels = @(
-    $liveModels | ForEach-Object {
-        $effectiveTool = Get-ToolCallEffective $_
-        [PSCustomObject]@{
-            modelId = $_.modelId
-            provider = $_.provider
-            tier = $_.tier
-            swe = if ($null -ne $_.swe) { [double]$_.swe } elseif ($null -ne $_.sweBench) { [double]$_.sweBench } else { 0.0 }
-            status = $_.status
-            verdict = if ($_.verdict) { $_.verdict } else { "Unknown" }
-            avgMs = if ($null -ne $_.avgMs) { [double]$_.avgMs } else { 9999.0 }
-            stability = if ($null -ne $_.stability) { [double]$_.stability } else { 0.0 }
-            degraded = [bool]$_.degraded
-            toolCallOk = $_.toolCallOk
-            toolCallProbeStatus = if ($_.toolCallProbeStatus) { [string]$_.toolCallProbeStatus } else { "unknown" }
-            effectiveToolCallOk = $effectiveTool
-            thinking = (Is-ThinkingModel $_.modelId)
-        }
-    }
-)
-
-$aliveModels = @($normalizedModels | Where-Object { $_.status -eq "up" })
-
-function Get-Score {
-    param($model, [hashtable]$W)
-    $avgMs = if ($null -ne $model.avgMs) { [double]$model.avgMs } else { 9999.0 }
-    $latScore  = [math]::Max(0, [math]::Min(100, 100 - (($avgMs - $W.LatTarget) * $W.LatPenalty)))
-    if ($script:IsDegraded) {
-        return $latScore
-    }
-    $sweScore  = if ($null -ne $model.swe) { [double]$model.swe } else { 0.0 }
-    $stability = if ($null -ne $model.stability) { [double]$model.stability } else { 30.0 }
-    $nimBonus  = if ($model.provider -eq "nvidia") { 8 } else { 0 }
-    return ($sweScore * $W.SWE) + ($stability * $W.Stab) + ($latScore * $W.Lat) + ($nimBonus * $W.NIM)
-}
-
-$Weights = @{
-    Opus     = @{ SWE=0.55; Stab=0.20; Lat=0.05; NIM=1.5; LatTarget=1500; LatPenalty=0.01 }
-    Sonnet   = @{ SWE=0.35; Stab=0.25; Lat=0.25; NIM=1.0; LatTarget=500;  LatPenalty=0.04 }
-    Haiku    = @{ SWE=0.05; Stab=0.15; Lat=0.70; NIM=0.5; LatTarget=200;  LatPenalty=0.12 }
-    Fallback = @{ SWE=0.25; Stab=0.50; Lat=0.10; NIM=1.0; LatTarget=800;  LatPenalty=0.02 }
-}
-
-$opusEligible = @(
-    $aliveModels | Where-Object {
-        $_.effectiveToolCallOk -and
-        -not $_.thinking -and
-        (Is-VerdictAllowed -Slot "opus" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
-    }
-)
-if ($opusEligible.Count -eq 0) {
-    $opusEligible = @($aliveModels | Where-Object { $_.effectiveToolCallOk -and -not $_.thinking })
-}
-$opusCandidate = $opusEligible | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
-if (-not $opusCandidate) {
-    $opusCandidate = $aliveModels | Sort-Object { Get-Score $_ $Weights.Opus } -Descending | Select-Object -First 1
-}
-
-$sonnetEligible = @(
-    $aliveModels | Where-Object {
-        $_.modelId -ne $opusCandidate.modelId -and
-        $_.effectiveToolCallOk -and
-        -not $_.thinking -and
-        (Is-VerdictAllowed -Slot "sonnet" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
-    }
-)
-if ($sonnetEligible.Count -eq 0) {
-    $sonnetEligible = @($aliveModels | Where-Object { $_.modelId -ne $opusCandidate.modelId -and $_.effectiveToolCallOk })
-}
-$sonnetCandidate = $sonnetEligible | Sort-Object { Get-Score $_ $Weights.Sonnet } -Descending | Select-Object -First 1
-if (-not $sonnetCandidate) { $sonnetCandidate = $opusCandidate }
-
-$haikuEligible = @(
-    $aliveModels | Where-Object {
-        $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) -and
-        -not $_.thinking -and
-        (Is-VerdictAllowed -Slot "haiku" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
-    }
-)
-if ($haikuEligible.Count -eq 0) {
-    $haikuEligible = @($aliveModels | Where-Object { $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId) })
-}
-$haikuCandidate = $haikuEligible | Sort-Object { Get-Score $_ $Weights.Haiku } -Descending | Select-Object -First 1
-if (-not $haikuCandidate) { $haikuCandidate = $sonnetCandidate }
-
-$fallbackEligible = @(
-    $aliveModels | Where-Object {
-        $_.modelId -notin @($opusCandidate.modelId, $sonnetCandidate.modelId, $haikuCandidate.modelId) -and
-        $_.effectiveToolCallOk -and
-        -not $_.thinking -and
-        (Is-VerdictAllowed -Slot "fallback" -Verdict $_.verdict -IsDegraded $script:IsDegraded)
-    }
-)
-if ($fallbackEligible.Count -eq 0) {
-    $fallbackEligible = @($aliveModels | Where-Object { $_.effectiveToolCallOk -and -not $_.thinking })
-}
-$fallbackCandidate = $fallbackEligible | Sort-Object { Get-Score $_ $Weights.Fallback } -Descending | Select-Object -First 1
-if (-not $fallbackCandidate) { $fallbackCandidate = $opusCandidate }
-
-$isThinking = if ($sonnetCandidate.thinking) { "true" } else { "false" }
-
-$candidatesJson = [ordered]@{
-    opus     = @(Get-TopCandidates -Models $opusEligible -Weight $Weights.Opus -Top 3)
-    sonnet   = @(Get-TopCandidates -Models $sonnetEligible -Weight $Weights.Sonnet -Top 3)
-    haiku    = @(Get-TopCandidates -Models $haikuEligible -Weight $Weights.Haiku -Top 3)
-    fallback = @(Get-TopCandidates -Models $fallbackEligible -Weight $Weights.Fallback -Top 3)
-}
 try {
-    $candidatesJson | ConvertTo-Json -Depth 6 | Out-File $candidatesFile -Encoding utf8
-    Write-Host "[OK] Candidates written to $candidatesFile" -ForegroundColor Green
+    $selectionResult = $selectorOutput | ConvertFrom-Json
 } catch {
-    Write-Host "[WARN] Failed to write ${candidatesFile}: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "[ERROR] Failed to parse JSON from selector.mjs." -ForegroundColor Red
+    exit 1
 }
 
-function Get-PrintableRunnerUp {
-    param($col)
-    if (-not $col -or $col.Count -lt 2) { return "none" }
-    $runner = $col[1].model.Split("/")[-1]
-    if ($runner.Length -gt 15) { $runner = $runner.Substring(0, 15) + ".." }
-    $diff = [math]::Round($col[0].score - $col[1].score, 1)
-    return "$runner (d-$diff)"
-}
-
-function Get-ScoreComponents {
-    param($model, [hashtable]$W)
-    $avgMs = if ($null -ne $model.avgMs -and $model.avgMs -ne 9999.0) { [double]$model.avgMs } else { 9999.0 }
-    $latScore = [math]::Max(0, [math]::Min(100, 100 - (($avgMs - $W.LatTarget) * $W.LatPenalty)))
-    if ($script:IsDegraded) { return [PSCustomObject]@{ SWE=0; Stab=0; Lat=$latScore; NIM=0; Total=$latScore } }
-    
-    $sweScore  = if ($null -ne $model.swe) { [double]$model.swe } else { 0.0 }
-    $stability = if ($null -ne $model.stability) { [double]$model.stability } else { 30.0 }
-    $nimBonus  = if ($model.provider -eq "nvidia") { 8 } else { 0 }
-    
-    return [PSCustomObject]@{
-        SWE   = [math]::Round($sweScore * $W.SWE, 1)
-        Stab  = [math]::Round($stability * $W.Stab, 1)
-        Lat   = [math]::Round($latScore * $W.Lat, 1)
-        NIM   = [math]::Round($nimBonus * $W.NIM, 1)
-        Total = [math]::Round((($sweScore * $W.SWE) + ($stability * $W.Stab) + ($latScore * $W.Lat) + ($nimBonus * $W.NIM)), 1)
-    }
-}
-
-$slots = @(
-    [PSCustomObject]@{ Name="OPUS";     Model=$opusCandidate;     Weight=$Weights.Opus;     Json=$candidatesJson.opus }
-    [PSCustomObject]@{ Name="SONNET";   Model=$sonnetCandidate;   Weight=$Weights.Sonnet;   Json=$candidatesJson.sonnet }
-    [PSCustomObject]@{ Name="HAIKU";    Model=$haikuCandidate;    Weight=$Weights.Haiku;    Json=$candidatesJson.haiku }
-    [PSCustomObject]@{ Name="FALLBACK"; Model=$fallbackCandidate; Weight=$Weights.Fallback; Json=$candidatesJson.fallback }
-)
-
+# ============================================================
+#  UI LAYER: MODEL SELECTION
+# ============================================================
 Write-Host ""
 Write-Host "============= MODEL SELECTION ===========================================================================" -ForegroundColor Cyan
 Write-Host ("{0,-10} | {1,-42} | {2,-5} | {3,-6} | {4,-7} | {5,-7} | {6}" -f "SLOT", "MODEL", "THINK", "SCORE", "VERDICT", "LAT(ms)", "Runner-up") -ForegroundColor DarkGray
 Write-Host "=========================================================================================================" -ForegroundColor Cyan
-foreach ($slot in $slots) {
-    if (-not $slot.Model) { continue }
-    $prefix = Get-ModelPrefix $slot.Model.provider $slot.Model.modelId
-    $think = if ($slot.Model.thinking) { "Yes" } else { "No" }
-    $score = [math]::Round((Get-Score $slot.Model $slot.Weight), 1)
-    $verd  = $slot.Model.verdict
-    $lat   = if ($slot.Model.avgMs -eq 9999.0) { "---" } else { [math]::Round($slot.Model.avgMs) }
-    $runup = Get-PrintableRunnerUp $slot.Json
-    Write-Host ("{0,-10} | {1,-42} | {2,-5} | {3,6} | {4,-7} | {5,7} | {6}" -f $slot.Name, $prefix, $think, $score, $verd, $lat, $runup) -ForegroundColor White
+
+$slotNames = @("opus", "sonnet", "haiku", "fallback")
+foreach ($sn in $slotNames) {
+    $slot = $selectionResult.slots.$sn
+    if (-not $slot -or -not $slot.winner) { continue }
+    
+    $w = $slot.winner
+    $prefix = Get-ModelPrefix $w.provider $w.modelId
+    $think = if ($w.thinking) { "Yes" } else { "No" }
+    $score = [math]::Round($w.score, 1)
+    $verd  = $w.verdict
+    $lat   = if ($w.avgMs -eq 9999.0) { "---" } else { [math]::Round($w.avgMs) }
+    
+    $runup = "none"
+    if ($slot.runner_up) {
+        $r = $slot.runner_up
+        $rName = $r.modelId.Split("/")[-1]
+        if ($rName.Length -gt 15) { $rName = $rName.Substring(0, 15) + ".." }
+        $diff = [math]::Round($w.score - $r.score, 1)
+        $runup = "$rName (d-$diff)"
+    }
+    
+    Write-Host ("{0,-10} | {1,-42} | {2,-5} | {3,6} | {4,-7} | {5,7} | {6}" -f $sn.ToUpper(), $prefix, $think, $score, $verd, $lat, $runup) -ForegroundColor White
 }
 
+# ============================================================
+#  UI LAYER: SCORE BREAKDOWN
+# ============================================================
 Write-Host ""
 Write-Host "============= SCORE BREAKDOWN ============================" -ForegroundColor Cyan
 Write-Host ("{0,-10} | {1,6} | {2,6} | {3,6} | {4,6} | {5,6}" -f "SLOT", "SWE", "STAB", "LAT", "NIM", "TOTAL") -ForegroundColor DarkGray
 Write-Host "==========================================================" -ForegroundColor Cyan
-foreach ($slot in $slots) {
-    if (-not $slot.Model) { continue }
-    $comps = Get-ScoreComponents $slot.Model $slot.Weight
-    Write-Host ("{0,-10} | {1,6:N1} | {2,6:N1} | {3,6:N1} | {4,6:N1} | {5,6:N1}" -f $slot.Name, $comps.SWE, $comps.Stab, $comps.Lat, $comps.NIM, $comps.Total) -ForegroundColor White
+
+foreach ($sn in $slotNames) {
+    $slot = $selectionResult.slots.$sn
+    if (-not $slot -or -not $slot.winner) { continue }
+    
+    $w = $slot.winner
+    $comps = $w.scoreComponents
+    Write-Host ("{0,-10} | {1,6:N1} | {2,6:N1} | {3,6:N1} | {4,6:N1} | {5,6:N1}" -f $sn.ToUpper(), $comps.swe, $comps.stab, $comps.lat, $comps.nim, $w.score) -ForegroundColor White
 }
 Write-Host ""
 
 # Build .env
 $envLines = if (Test-Path $envPath) { Get-Content $envPath } else { @() }
 $newLines = @()
+$isThinking = if ($selectionResult.is_thinking) { "true" } else { "false" }
+
 $mappings = @{
-    "MODEL_OPUS="          = "MODEL_OPUS=`"$(Get-ModelPrefix $opusCandidate.provider $opusCandidate.modelId)`""
-    "MODEL_SONNET="        = "MODEL_SONNET=`"$(Get-ModelPrefix $sonnetCandidate.provider $sonnetCandidate.modelId)`""
-    "MODEL_HAIKU="         = "MODEL_HAIKU=`"$(Get-ModelPrefix $haikuCandidate.provider $haikuCandidate.modelId)`""
-    "MODEL="               = "MODEL=`"$(Get-ModelPrefix $fallbackCandidate.provider $fallbackCandidate.modelId)`""
+    "MODEL_OPUS="          = "MODEL_OPUS=`"$(Get-ModelPrefix $selectionResult.slots.opus.winner.provider $selectionResult.slots.opus.winner.modelId)`""
+    "MODEL_SONNET="        = "MODEL_SONNET=`"$(Get-ModelPrefix $selectionResult.slots.sonnet.winner.provider $selectionResult.slots.sonnet.winner.modelId)`""
+    "MODEL_HAIKU="         = "MODEL_HAIKU=`"$(Get-ModelPrefix $selectionResult.slots.haiku.winner.provider $selectionResult.slots.haiku.winner.modelId)`""
+    "MODEL="               = "MODEL=`"$(Get-ModelPrefix $selectionResult.slots.fallback.winner.provider $selectionResult.slots.fallback.winner.modelId)`""
     "NIM_ENABLE_THINKING=" = "NIM_ENABLE_THINKING=$isThinking"
 }
+
 
 foreach ($line in $envLines) {
     $matched = $false

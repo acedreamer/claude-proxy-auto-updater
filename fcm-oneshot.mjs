@@ -52,9 +52,28 @@ const getArg = (flag) => {
 }
 const hasFlag = (flag) => args.includes(flag)
 
-const TIMEOUT_MS = parseInt(getArg('--timeout') || '15000', 10)
-const filterProvs = (getArg('--providers') || '').split(',').filter(Boolean)
-const filterTiers = (getArg('--tier') || '').split(',').filter(Boolean)
+/**
+ * Load general settings from config.json if available
+ */
+export async function loadConfig(configPath) {
+  try {
+    const p = configPath || path.join(path.dirname(fileURLToPath(import.meta.url)), 'config.json')
+    if (fs.existsSync(p)) {
+      const data = fs.readFileSync(p, 'utf8')
+      const cfg = JSON.parse(data)
+      return cfg.general || {}
+    }
+  } catch (err) {
+    // Silent fail, use defaults
+  }
+  return {}
+}
+
+const configGeneral = await loadConfig()
+
+const TIMEOUT_MS = parseInt(getArg('--timeout') || configGeneral.timeout_ms || '15000', 10)
+const filterProvs = (getArg('--providers') || configGeneral.providers || '').split(',').filter(Boolean)
+const filterTiers = (getArg('--tier') || configGeneral.tier_filter || '').split(',').filter(Boolean)
 const MAX_CONCUR = parseInt(getArg('--concurrency') || '12', 10)
 const ENABLE_TOOL_TEST = hasFlag('--tool-test') // R-401: Tool-call probe flag
 
@@ -461,7 +480,11 @@ async function main() {
   process.exit(0)
 }
 
-main().catch(err => {
-  process.stderr.write(`[fcm-oneshot] Fatal error: ${err.message}\n`)
-  process.exit(1)
-})
+// Only run main if this file is executed directly
+const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))
+if (isMain) {
+  main().catch(err => {
+    process.stderr.write(`[fcm-oneshot] Fatal error: ${err.message}\n`)
+    process.exit(1)
+  })
+}
