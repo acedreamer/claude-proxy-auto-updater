@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 #  Claude Proxy Auto-Updater  v6.1
 #  acedreamer/claude-proxy-auto-updater
 #
-#  UX Polish & Centralized Brain (v6.0+)
+#  UX Polish & Centralized Brain (v6.1+)
 # ============================================================
 
 $envPath    = Join-Path $PSScriptRoot ".env"
