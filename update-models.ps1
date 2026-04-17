@@ -30,7 +30,7 @@ $DryRun = ($args -contains '--dry-run') -or ($args -contains '-DryRun')
 $ToolTest = ($args -contains '--tool-test')
 
 $Config = @{
-    CacheTTLMinutes = 0.3      # Minutes before re-running fcm-oneshot
+    CacheTTLMinutes = 15      # Minutes before re-running fcm-oneshot
     PingTimeoutMs   = 15000   # Passed to fcm-oneshot --timeout
     Providers       = "nvidia,openrouter"  # Comma list passed to fcm-oneshot --providers
     TierFilter      = "S+,S,A+,A"   # Only S+/S/A+/A tier models

@@ -55,7 +55,13 @@ Free AI model availability changes constantly. Instead of manually testing and c
    cd claude-proxy-auto-updater
    ```
 
-2. **Install free-coding-models (optional but recommended):**
+2. **Run the One-Click Launcher (Windows):**
+   Simply double-click `@start_server.bat`. It will automatically:
+   - Check for your `.env` file (and create a template if missing)
+   - Run the model updater to find the best available models
+   - Launch the Claude Proxy server using `uv` (or standard Python)
+
+3. **Install free-coding-models (optional but recommended):**
    ```bash
    npm install -g free-coding-models
    ```
@@ -170,10 +176,6 @@ Run the test suite to verify functionality:
 ```powershell
 # Windows - run all tests
 .\run-tests.ps1
-
-# Or specific test files
-.\run-tests-fixed.ps1
-.\run-tests-final.ps1
 ```
 
 Individual test files are located in:
