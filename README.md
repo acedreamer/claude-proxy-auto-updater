@@ -49,7 +49,12 @@ Free AI model availability changes constantly. Instead of manually testing and c
 
 ### Quick Start
 
-1. **Clone the repository:**
+1. **Download the latest release:**
+   Go to the [Releases](https://github.com/acedreamer/claude-proxy-auto-updater/releases) page and download the ZIP file for your platform:
+   - `claude-proxy-auto-updater-windows.zip` (for Windows)
+   - `claude-proxy-auto-updater-linux-macos.zip` (for Linux/macOS)
+   
+   *Alternatively, clone the repository:*
    ```bash
    git clone https://github.com/acedreamer/claude-proxy-auto-updater.git
    cd claude-proxy-auto-updater
