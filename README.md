@@ -5,16 +5,16 @@
 [![Bash](https://img.shields.io/badge/Bash-3.2+-4EAA25.svg)](https://www.gnu.org/software/bash/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Intelligent model selection for free-claude-code proxy â€” automatically picks the best available AI models at startup.**
+> **Intelligent model selection for free-claude-code proxy — automatically picks the best available AI models at startup.**
 
 ## What It Does
 
 The Claude Proxy Auto-Updater connects to free AI model providers (NVIDIA NIM and OpenRouter) in real-time, measures actual performance metrics (latency, stability, SWE bench scores), and automatically selects the optimal models for each proxy slot using a unified Node.js decision engine:
 
-- **OPUS** â€” Heavy reasoning tasks requiring the highest quality
-- **SONNET** â€” Balanced performance for general coding work
-- **HAIKU** â€” Fast responses for lightweight queries
-- **FALLBACK** â€” Reliable backup when primary models are unavailable
+- **OPUS** — Heavy reasoning tasks requiring the highest quality
+- **SONNET** — Balanced performance for general coding work
+- **HAIKU** — Fast responses for lightweight queries
+- **FALLBACK** — Reliable backup when primary models are unavailable
 
 ## Why Use It?
 
@@ -80,8 +80,39 @@ Free AI model availability changes constantly. Instead of manually testing and c
    OPENROUTER_API_KEY="your-key-here"
    ```
 
-`n## Example Output`n`nWhen you run the updater, you get a real-time telemetry ping followed by intelligent slot selection based on actual performance and quality scores:`n`n```text`n======== PINGING MODELS VIA FREE-CODING-MODELS ========`n  Running one-shot ping (timeout: 15000ms per model)...`n  Providers: nvidia,openrouter  |  Tier filter: S+,S,A+,A`n`n  MODEL                                                  VERDICT    AVG      STAB     TIER`n  [OK] nvidia/moonshotai/kimi-k2-instruct-0905            Normal     744ms    96       S`n  [OK] nvidia/qwen/qwen3-next-80b-a3b-thinking            Perfect    272ms    98       S`n  [OK] nvidia/openai/gpt-oss-120b                         Perfect    340ms    98       S`n  ...`n`n============= MODEL SELECTION ===========================================================================       `nSLOT       | MODEL (Short)                          | THINK | SCORE  | VERDICT | LAT(ms) | Runner-up`n=========================================================================================================       `nOPUS       | kimi-k2-instruct-0905(nvidia)          | No    |   72.4 | Normal  |     744 | kimi-k2-instruct(nvidia) (d-0.0)`nSONNET     | llama-4-maverick-17b-128e-instruct(nvidia) | No    |   79.2 | Perfect |     263 | gpt-oss-120b(nvidia) (d-0.7)`nHAIKU      | qwen2.5-coder-32b-instruct(nvidia)     | No    |   86.5 | Perfect |     254 | gpt-oss-20b(nvidia) (d-0.5)`nFALLBACK   | kimi-k2.5(nvidia)                      | No    |   82.9 | Slow    |    1216 | kimi-k2-instruct-0905(nvidia) (d-0.4)`n`n============= SCORE BREAKDOWN ============================`nSLOT       |    SWE |   STAB |    LAT |    NIM |  TOTAL`n==========================================================`nOPUS       |   36.2 |   19.2 |    5.0 |   12.0 |   72.4`nSONNET     |   21.7 |   24.5 |   25.0 |    8.0 |   79.2`nHAIKU      |    2.3 |   14.7 |   65.5 |    4.0 |   86.5`nFALLBACK   |   19.2 |   46.5 |    9.2 |    8.0 |   82.9`n```n## Usage
+## Example Output
 
+When you run the updater, you get a real-time telemetry ping followed by intelligent slot selection based on actual performance and quality scores:
+
+```text
+======== PINGING MODELS VIA FREE-CODING-MODELS ========
+  Running one-shot ping (timeout: 15000ms per model)...
+  Providers: nvidia,openrouter  |  Tier filter: S+,S,A+,A
+
+  MODEL                                                  VERDICT    AVG      STAB     TIER
+  [OK] nvidia/moonshotai/kimi-k2-instruct-0905            Normal     744ms    96       S
+  [OK] nvidia/qwen/qwen3-next-80b-a3b-thinking            Perfect    272ms    98       S
+  [OK] nvidia/openai/gpt-oss-120b                         Perfect    340ms    98       S
+  ...
+
+============= MODEL SELECTION ===========================================================================       
+SLOT       | MODEL (Short)                          | THINK | SCORE  | VERDICT | LAT(ms) | Runner-up
+=========================================================================================================       
+OPUS       | kimi-k2-instruct-0905(nvidia)          | No    |   72.4 | Normal  |     744 | kimi-k2-instruct(nvidia) (d-0.0)
+SONNET     | llama-4-maverick-17b-128e-instruct(nvidia) | No    |   79.2 | Perfect |     263 | gpt-oss-120b(nvidia) (d-0.7)
+HAIKU      | qwen2.5-coder-32b-instruct(nvidia)     | No    |   86.5 | Perfect |     254 | gpt-oss-20b(nvidia) (d-0.5)
+FALLBACK   | kimi-k2.5(nvidia)                      | No    |   82.9 | Slow    |    1216 | kimi-k2-instruct-0905(nvidia) (d-0.4)
+
+============= SCORE BREAKDOWN ============================
+SLOT       |    SWE |   STAB |    LAT |    NIM |  TOTAL
+==========================================================
+OPUS       |   36.2 |   19.2 |    5.0 |   12.0 |   72.4
+SONNET     |   21.7 |   24.5 |   25.0 |    8.0 |   79.2
+HAIKU      |    2.3 |   14.7 |   65.5 |    4.0 |   86.5
+FALLBACK   |   19.2 |   46.5 |    9.2 |    8.0 |   82.9
+```
+
+## Usage
 ### Basic Usage
 
 The script automatically updates your `.env` file with the best available models:
@@ -153,17 +184,17 @@ node --test tests/selector.test.mjs
 
 ```
 claude-proxy-auto-updater/
-â”œâ”€â”€ update-models.ps1          # PowerShell UI Wrapper (Windows)
-â”œâ”€â”€ update-models.sh           # Bash UI Wrapper (Linux/macOS)
-â”œâ”€â”€ setup.ps1                  # Setup Engine (Windows)
-â”œâ”€â”€ setup.sh                   # Setup Engine (Linux/macOS)
-â”œâ”€â”€ selector.mjs               # The Brain: Unified decision engine
-â”œâ”€â”€ fcm-oneshot.mjs            # Data Collector: Real-time telemetry
-â”œâ”€â”€ @start_server.bat          # One-Click Launcher (Windows)
-â”œâ”€â”€ config.example.json        # Template for user settings
-â”œâ”€â”€ .env                       # Your API keys (not committed)
-â”œâ”€â”€ docs/                      # Documentation & Archives
-â””â”€â”€ tests/                     # Test suite & Runner
+├── update-models.ps1          # PowerShell UI Wrapper (Windows)
+├── update-models.sh           # Bash UI Wrapper (Linux/macOS)
+├── setup.ps1                  # Setup Engine (Windows)
+├── setup.sh                   # Setup Engine (Linux/macOS)
+├── selector.mjs               # The Brain: Unified decision engine
+├── fcm-oneshot.mjs            # Data Collector: Real-time telemetry
+├── @start_server.bat          # One-Click Launcher (Windows)
+├── config.example.json        # Template for user settings
+├── .env                       # Your API keys (not committed)
+├── docs/                      # Documentation & Archives
+└── tests/                     # Test suite & Runner
 ```
 
 ## Contributing
