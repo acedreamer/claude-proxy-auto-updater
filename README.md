@@ -7,6 +7,8 @@
 
 > **Intelligent model selection for free-claude-code proxy — automatically picks the best available AI models at startup.**
 
+![Demo](./demo.gif)
+
 ## What It Does
 
 The Claude Proxy Auto-Updater connects to free AI model providers (NVIDIA NIM and OpenRouter) in real-time, measures actual performance metrics (latency, stability, SWE bench scores), and automatically selects the optimal models for each proxy slot using a unified Node.js decision engine:
