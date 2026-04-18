@@ -7,7 +7,7 @@
 
 > **Intelligent model selection for free-claude-code proxy — automatically picks the best available AI models at startup.**
 
-![Demo](./demo.gif)
+![Demo](./f.gif)
 
 ## What It Does
 
