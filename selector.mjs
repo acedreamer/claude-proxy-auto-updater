@@ -24,6 +24,13 @@ export const DEFAULT_CONFIG = {
   }
 };
 
+export function stripBOM(content) {
+  if (typeof content === 'string' && content.charCodeAt(0) === 0xFEFF) {
+    return content.slice(1);
+  }
+  return content;
+}
+
 export async function readConfig(configPath) {
   let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   if (!configPath) {
@@ -31,7 +38,7 @@ export async function readConfig(configPath) {
   }
   try {
     const data = await fs.readFile(configPath, 'utf8');
-    const userConfig = JSON.parse(data);
+    const userConfig = JSON.parse(stripBOM(data));
     config = mergeDeep(config, userConfig);
   } catch (err) {
     // Missing or invalid, just use defaults
@@ -192,14 +199,15 @@ function mergeDeep(target, source) {
 
 // Main execution
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const cachePath = path.resolve(process.cwd(), 'model-cache.json');
-  const configPath = path.resolve(process.cwd(), 'config.json');
-  
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const cachePath = path.resolve(scriptDir, 'model-cache.json');
+  const configPath = path.resolve(scriptDir, 'config.json');
+
   try {
     const cacheData = await fs.readFile(cachePath, 'utf8');
-    const models = JSON.parse(cacheData);
+    const models = JSON.parse(stripBOM(cacheData));
     const config = await readConfig(configPath);
-    
+
     const result = assignSlots(models, config);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } catch (err) {
@@ -211,3 +219,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
 }
+

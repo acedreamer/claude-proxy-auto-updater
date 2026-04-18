@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 #  Claude Proxy Auto-Updater  v6.1
 #  acedreamer/claude-proxy-auto-updater
 #
-#  UX Polish & Centralized Brain (v6.1+)
+#  UX Polish & Centralized Brain (v6.0+)
 # ============================================================
 
 $envPath    = Join-Path $PSScriptRoot ".env"
@@ -85,7 +85,7 @@ function Extract-JsonArrayFromText {
 # ============================================================
 $configData = @{}
 if (Test-Path $configFile) {
-    try { $configData = Get-Content $configFile -Raw | ConvertFrom-Json } catch { }
+    try { $configData = Get-Content $configFile -Encoding UTF8 -Raw | ConvertFrom-Json } catch { }
 }
 
 # Default settings if config missing
@@ -120,7 +120,7 @@ if (Test-Path $cacheFile) {
     $cacheAge = (Get-Date) - (Get-Item $cacheFile).LastWriteTime
     if ($cacheAge.TotalMinutes -lt $CacheTTL) {
         try {
-            $cached = Get-Content $cacheFile -Raw | ConvertFrom-Json
+            $cached = Get-Content $cacheFile -Encoding UTF8 -Raw | ConvertFrom-Json
             if ($cached -and $cached.Count -gt 0 -and $cached[0].modelId) {
                 $liveModels = $cached
                 $usingCache = $true
@@ -195,14 +195,19 @@ if (-not $usingCache) {
 # ============================================================
 Write-Host "  Selecting best models for each slot..." -ForegroundColor White
 
-$selectorOutput = & node $selectorScript 2>$null
+$selectorOutput = & node "$selectorScript" 2>$null
 if ($LASTEXITCODE -ne 0 -or -not $selectorOutput) {
     Write-Host "[ERROR] selector.mjs failed." -ForegroundColor Red
     exit 1
 }
 
 try {
-    $selectionResult = $selectorOutput | ConvertFrom-Json
+    # Convert node output to string and strip potential UTF8 BOM
+    $rawJson = [string]$selectorOutput
+    if ($rawJson.Length -gt 0 -and [int]$rawJson[0] -eq 65279) {
+        $rawJson = $rawJson.Substring(1)
+    }
+    $selectionResult = $rawJson | ConvertFrom-Json
 } catch {
     Write-Host "[ERROR] Failed to parse selection result." -ForegroundColor Red
     exit 1
@@ -234,7 +239,7 @@ if ($null -eq $showInsights -and -not $DryRun) {
     if ($choice -eq "n") { $enabled = $false }
     
     # Update config.json via selector.mjs helper if possible, or direct write
-    & node -e "const fs=require('fs'); const c=JSON.parse(fs.readFileSync('$($configFile.Replace('\','\\'))', 'utf8')); c.preferences.show_insights=$($enabled.ToString().ToLower()); fs.writeFileSync('$($configFile.Replace('\','\\'))', JSON.stringify(c, null, 2));"
+    & node -e "const fs=require('fs'); const data=fs.readFileSync('$($configFile.Replace('\','\\'))', 'utf8'); const c=JSON.parse(data.charCodeAt(0)===0xFEFF?data.slice(1):data); c.preferences.show_insights=$($enabled.ToString().ToLower()); fs.writeFileSync('$($configFile.Replace('\','\\'))', JSON.stringify(c, null, 2));"
 }
 
 # ============================================================
