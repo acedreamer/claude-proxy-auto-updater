@@ -12,6 +12,7 @@
 
 import { createRequire } from 'module'
 import { fileURLToPath, pathToFileURL } from 'url'
+import { performance } from 'node:perf_hooks'
 import path from 'path'
 import fs from 'fs'
 import { execSync } from 'child_process'

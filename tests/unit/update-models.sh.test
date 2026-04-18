@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+#
+# Unit tests for update-models.sh utility functions
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+passed=0
+failed=0
+
+assert() {
+  local expected="$1"
+  local result="$2"
+  local test_name="$3"
+
+  if [[ "$result" == "$expected" ]]; then
+    echo -e "${GREEN}[PASS]${NC} $test_name"
+    passed=$((passed + 1))
+  else
+    echo -e "${RED}[FAIL]${NC} $test_name"
+    echo "  Expected: '$expected'"
+    echo "  Got: '$result'"
+    failed=$((failed + 1))
+  fi
+}
+
+# Source the script (conditional execution in update-models.sh allows this)
+# shellcheck source=../../update-models.sh
+source "$PROJECT_DIR/update-models.sh"
+
+echo "=========================================="
+echo "Running update-models.sh utility tests"
+echo "=========================================="
+
+# Test get_model_prefix
+echo "Testing get_model_prefix..."
+assert "nvidia_nim/m1" "$(get_model_prefix nvidia m1)" "nvidia prefix"
+assert "open_router/m1" "$(get_model_prefix openrouter m1)" "openrouter prefix"
+assert "custom/m1" "$(get_model_prefix custom m1)" "unknown provider"
+
+# Test read_env_file
+echo ""
+echo "Testing read_env_file..."
+tmp_env="${SCRIPT_DIR}/test.env"
+cat <<EOF > "$tmp_env"
+# Comment
+KEY1=val1
+KEY2="val2"
+KEY3='val3'
+EOF
+
+results=$(read_env_file "$tmp_env")
+# Filter lines for specific keys
+v1=$(echo "$results" | grep KEY1 | cut -d= -f2)
+v2=$(echo "$results" | grep KEY2 | cut -d= -f2)
+v3=$(echo "$results" | grep KEY3 | cut -d= -f2)
+
+assert "val1" "$v1" "KEY1 value"
+assert "val2" "$v2" "KEY2 value (stripped quotes)"
+assert "val3" "$v3" "KEY3 value (stripped single quotes)"
+
+rm "$tmp_env"
+
+echo ""
+echo "=========================================="
+echo "Results: $passed passed, $failed failed"
+echo "=========================================="
+
+[[ $failed -eq 0 ]] && exit 0 || exit 1

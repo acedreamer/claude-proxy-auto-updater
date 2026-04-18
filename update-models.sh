@@ -10,12 +10,12 @@ set -euo pipefail
 # ============================================================
 # CONFIGURATION
 # ============================================================
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly ENV_PATH="${SCRIPT_DIR}/.env"
-readonly CACHE_FILE="${SCRIPT_DIR}/model-cache.json"
-readonly CONFIG_FILE="${SCRIPT_DIR}/config.json"
-readonly ONESHOT_SCRIPT="${SCRIPT_DIR}/fcm-oneshot.mjs"
-readonly SELECTOR_SCRIPT="${SCRIPT_DIR}/selector.mjs"
+[[ -z "${SCRIPT_DIR:-}" ]] && SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -z "${ENV_PATH:-}" ]] && ENV_PATH="${SCRIPT_DIR}/.env"
+[[ -z "${CACHE_FILE:-}" ]] && CACHE_FILE="${SCRIPT_DIR}/model-cache.json"
+[[ -z "${CONFIG_FILE:-}" ]] && CONFIG_FILE="${SCRIPT_DIR}/config.json"
+[[ -z "${ONESHOT_SCRIPT:-}" ]] && ONESHOT_SCRIPT="${SCRIPT_DIR}/fcm-oneshot.mjs"
+[[ -z "${SELECTOR_SCRIPT:-}" ]] && SELECTOR_SCRIPT="${SCRIPT_DIR}/selector.mjs"
 
 # Config values (mirrored from selector.mjs defaults or override via config.json)
 CACHE_TTL_MINUTES=15
@@ -26,14 +26,14 @@ TIER_FILTER="S+,S,A+,A"
 # ============================================================
 # UTILITIES
 # ============================================================
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly CYAN='\033[0;36m'
-readonly MAGENTA='\033[0;35m'
-readonly WHITE='\033[1;37m'
-readonly DARKGRAY='\033[1;30m'
-readonly NC='\033[0m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+WHITE='\033[1;37m'
+DARKGRAY='\033[1;30m'
+NC='\033[0m'
 
 log_banner() {
     local text="$1"
@@ -345,4 +345,7 @@ main() {
     unset OPENROUTER_API_KEY
 }
 
-main "$@"
+# Only run main if this script is executed directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
