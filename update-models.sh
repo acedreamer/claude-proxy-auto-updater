@@ -159,14 +159,26 @@ main() {
         local node_args=("$ONESHOT_SCRIPT" "--providers" "$PROVIDERS" "--tier" "$TIER_FILTER" "--timeout" "$PING_TIMEOUT_MS")
         [[ "$tool_test" == "true" ]] && node_args+=("--tool-test")
 
-        local raw_output
-        raw_output=$(node "${node_args[@]}" 2>&1) || {
+        local tmp_json
+        tmp_json=$(mktemp)
+        node_args+=("--output" "$tmp_json")
+
+        # R-601: Stream progress live to console natively
+        node "${node_args[@]}" || {
             log_warn "fcm-oneshot exited with error. Attempting to parse partial output."
         }
 
-        # Extract JSON array
+        # Extract JSON array from the output file
         local json_output
-        json_output=$(echo "$raw_output" | node -e '
+        if [[ -f "$tmp_json" ]]; then
+            json_output=$(cat "$tmp_json")
+            rm -f "$tmp_json"
+        else
+            json_output="[]"
+        fi
+
+        # Simple extraction in case of surrounding text
+        json_output=$(echo "$json_output" | node -e '
             const fs = require("fs");
             const s = fs.readFileSync(0, "utf8");
             for (let i = 0; i < s.length; i++) {
@@ -195,20 +207,6 @@ main() {
         fi
 
         echo "$json_output" > "$CACHE_FILE"
-        
-        # Print summary table of pings
-        echo ""
-        printf "  ${DARKGRAY}%-54s %-10s %-8s %-8s %s${NC}\n" "MODEL" "VERDICT" "AVG" "STAB" "TIER"
-        echo "$json_output" | node -e '
-            const models = JSON.parse(require("fs").readFileSync(0, "utf8"));
-            models.forEach(m => {
-                const tag = m.status === "up" ? "[OK]" : "[XX]";
-                const avg = m.avgMs ? m.avgMs + "ms" : "---";
-                const stab = m.stability !== null ? m.stability : "?";
-                const name = m.provider + "/" + m.modelId;
-                process.stdout.write(`  ${tag} ${name.padEnd(50)} ${m.verdict.padEnd(10)} ${avg.padEnd(8)} ${String(stab).padEnd(8)} ${m.tier}\n`);
-            });
-        '
         echo ""
     fi
 

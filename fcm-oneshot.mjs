@@ -77,6 +77,7 @@ const filterProvs = (getArg('--providers') || configGeneral.providers || '').spl
 const filterTiers = (getArg('--tier') || configGeneral.tier_filter || '').split(',').filter(Boolean)
 const MAX_CONCUR = parseInt(getArg('--concurrency') || '12', 10)
 const ENABLE_TOOL_TEST = hasFlag('--tool-test') // R-401: Tool-call probe flag
+const OUTPUT_FILE = getArg('--output')
 
 // ============================================================
 // KEY RESOLUTION
@@ -347,6 +348,7 @@ async function main() {
   // PING WITH CONCURRENCY
   // ============================================================
 
+  let finishedCount = 0;
   async function pingModel(model) {
     const ctrl = new AbortController()
     const timeout = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
@@ -393,11 +395,20 @@ async function main() {
       model.toolCallOk = toolResult.toolCallOk
       model.toolCallProbeStatus = toolResult.probeStatus || 'unknown'
 
+      finishedCount++
+      const tag = model.status === 'up' ? 'OK' : 'XX'
+      const avg = (result.ms === 'TIMEOUT' || result.ms === undefined) ? '---' : `${Math.round(result.ms)}ms`
+      const name = `${model.providerKey}/${model.modelId}`
+      process.stdout.write(`  [${tag}] ${name.padEnd(50)} ${avg.padStart(7)}  (${finishedCount}/${candidates.length})\n`)
+
     } catch (err) {
       clearTimeout(timeout)
       model.status = 'down'
       model.toolCallOk = null
       model.toolCallProbeStatus = 'unknown'
+      
+      finishedCount++
+      process.stdout.write(`  [XX] ${model.providerKey}/${model.modelId.padEnd(50)} FAILED  (${finishedCount}/${candidates.length})\n`)
     }
   }
 
@@ -477,7 +488,13 @@ async function main() {
     }
   })
 
-  process.stdout.write(JSON.stringify(output, null, 2) + '\n')
+  const jsonOutput = JSON.stringify(output, null, 2) + '\n'
+  if (OUTPUT_FILE) {
+    fs.writeFileSync(OUTPUT_FILE, jsonOutput)
+    // Don't write anything else to stdout so we don't mess up powershell/bash console
+  } else {
+    process.stdout.write(jsonOutput)
+  }
   process.exit(0)
 }
 

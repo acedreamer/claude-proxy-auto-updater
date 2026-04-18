@@ -165,12 +165,22 @@ if ($MyInvocation.InvocationName -ne '.') {
             Write-Host "  Tool-call probing: ENABLED" -ForegroundColor Yellow
         }
 
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        $nodeArgs += "--output", $tmpJson
+
         $ErrorActionPreference = 'Continue'
-        $rawOutput = & node @nodeArgs 2>&1
+        # Node output (live progress) streams directly to console natively
+        & node @nodeArgs
         $exitCode  = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
 
-        $rawText = ($rawOutput | ForEach-Object { [string]$_ }) -join "`n"
+        if (Test-Path $tmpJson) {
+            $rawText = Get-Content $tmpJson -Raw
+            Remove-Item $tmpJson -ErrorAction SilentlyContinue
+        } else {
+            $rawText = "[]"
+        }
+
         $parsed = Extract-JsonArrayFromText -Text $rawText
         if ($parsed -and $parsed.Count -gt 0) {
             $liveModels = $parsed
@@ -180,17 +190,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             Write-Host "[WARN] fcm-oneshot returned no usable data. Using existing .env." -ForegroundColor Yellow
             exit 0
         }
-
-        # Summary table
-        Write-Host ""
-        Write-Host ("  {0,-54} {1,-10} {2,-8} {3,-8} {4}" -f "MODEL", "VERDICT", "AVG", "STAB", "TIER") -ForegroundColor DarkGray
-        foreach ($m in $liveModels) {
-            $tag     = if ($m.status -eq "up") { "[OK]" } else { "[XX]" }
-            $avgStr  = if ($m.avgMs)  { "$($m.avgMs)ms" }  else { "---" }
-            $stabStr = if ($null -ne $m.stability) { "$($m.stability)" } else { "?" }
-            Write-Host ("  $tag {0,-50} {1,-10} {2,-8} {3,-8} {4}" -f "$($m.provider)/$($m.modelId)", $m.verdict, $avgStr, $stabStr, $m.tier) -ForegroundColor White
-        }
-        Write-Host ""
 
         try {
             $liveModels | ConvertTo-Json -Depth 5 | Out-File $cacheFile -Encoding utf8
