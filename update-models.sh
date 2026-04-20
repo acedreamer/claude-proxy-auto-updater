@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 #
-# Claude Proxy Auto-Updater v6.1 - Bash Edition
+# Claude Proxy Auto-Updater v6.2 - Bash Edition
 # acedreamer/claude-proxy-auto-updater
 #
 # UX Polish & Centralized Brain (v6.1+)
@@ -322,8 +322,8 @@ main() {
                     [[ -n "$haiku_p" ]] && echo "MODEL_HAIKU=\"$haiku_p\"" && up_haiku=1
                 elif [[ "$line" =~ ^[[:space:]]*MODEL= ]]; then
                     [[ -n "$fallback_p" ]] && echo "MODEL=\"$fallback_p\"" && up_fallback=1
-                elif [[ "$line" =~ ^[[:space:]]*NIM_ENABLE_THINKING= ]]; then
-                    echo "NIM_ENABLE_THINKING=$is_thinking"; up_thinking=1
+                elif [[ "$line" =~ ^[[:space:]]*ENABLE_THINKING= ]]; then
+                    echo "ENABLE_THINKING=$is_thinking"; up_thinking=1
                 else
                     echo "$line"
                 fi
@@ -332,7 +332,7 @@ main() {
             [[ $up_sonnet -eq 0 && -n "$sonnet_p" ]] && echo "MODEL_SONNET=\"$sonnet_p\""
             [[ $up_haiku -eq 0 && -n "$haiku_p" ]] && echo "MODEL_HAIKU=\"$haiku_p\""
             [[ $up_fallback -eq 0 && -n "$fallback_p" ]] && echo "MODEL=\"$fallback_p\""
-            [[ $up_thinking -eq 0 ]] && echo "NIM_ENABLE_THINKING=$is_thinking"
+            [[ $up_thinking -eq 0 ]] && echo "ENABLE_THINKING=$is_thinking"
         } > "$temp_env"
         mv "$temp_env" "$ENV_PATH"
         log_info ".env updated via fcm-oneshot telemetry."

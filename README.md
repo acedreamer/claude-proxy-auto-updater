@@ -1,6 +1,6 @@
 ﻿# Claude Proxy Auto-Updater
 
-[![Version](https://img.shields.io/badge/version-6.1-blue.svg)](https://github.com/acedreamer/claude-proxy-auto-updater)
+[![Version](https://img.shields.io/badge/version-6.2-blue.svg)](https://github.com/acedreamer/claude-proxy-auto-updater)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE.svg)](https://docs.microsoft.com/powershell/)
 [![Bash](https://img.shields.io/badge/Bash-3.2+-4EAA25.svg)](https://www.gnu.org/software/bash/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

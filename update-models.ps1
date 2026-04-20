@@ -1,8 +1,8 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
-#  Claude Proxy Auto-Updater  v6.1
+#  Claude Proxy Auto-Updater  v6.2
 #  acedreamer/claude-proxy-auto-updater
 #
 #  UX Polish & Centralized Brain (v6.0+)
@@ -307,7 +307,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "MODEL_SONNET="        = "MODEL_SONNET=`"$(Get-Pref sonnet)`""
             "MODEL_HAIKU="         = "MODEL_HAIKU=`"$(Get-Pref haiku)`""
             "MODEL="               = "MODEL=`"$(Get-Pref fallback)`""
-            "NIM_ENABLE_THINKING=" = "NIM_ENABLE_THINKING=$isThinking"
+            "ENABLE_THINKING=" = "ENABLE_THINKING=$isThinking"
         }
 
         $envLines = if (Test-Path $envPath) { Get-Content $envPath } else { @() }

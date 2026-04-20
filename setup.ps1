@@ -1,5 +1,5 @@
-# Claude Proxy Auto-Updater - Setup Engine (Windows)
-# Version: 1.0
+﻿# Claude Proxy Auto-Updater - Setup Engine (Windows)
+# Version: 1.1
 $ErrorActionPreference = 'Stop'
 
 function Write-Step {
@@ -109,7 +109,7 @@ if (Test-Path $envPath) {
         "MODEL_SONNET=`"`"",
         "MODEL_HAIKU=`"`"",
         "MODEL=`"`"",
-        "NIM_ENABLE_THINKING=false"
+        "ENABLE_THINKING=false"
     )
     $content | Out-File $envPath -Encoding utf8
     Write-Success "Created .env with your keys."

@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # Claude Proxy Auto-Updater - Setup Engine (Linux/macOS)
-# Version: 1.0
+# Version: 1.1
 
 set -euo pipefail
 
@@ -108,7 +108,7 @@ MODEL_OPUS=""
 MODEL_SONNET=""
 MODEL_HAIKU=""
 MODEL=""
-NIM_ENABLE_THINKING=false
+ENABLE_THINKING=false
 EOF
     write_success "Created .env with your keys."
 fi

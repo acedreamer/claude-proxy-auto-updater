@@ -1,4 +1,4 @@
-# Refactor update-models.ps1 Implementation Plan
+﻿# Refactor update-models.ps1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -172,7 +172,7 @@ $mappings = @{
     "MODEL_SONNET="        = "MODEL_SONNET=`"$(Get-ModelPrefix $selectionResult.slots.sonnet.winner.provider $selectionResult.slots.sonnet.winner.modelId)`""
     "MODEL_HAIKU="         = "MODEL_HAIKU=`"$(Get-ModelPrefix $selectionResult.slots.haiku.winner.provider $selectionResult.slots.haiku.winner.modelId)`""
     "MODEL="               = "MODEL=`"$(Get-ModelPrefix $selectionResult.slots.fallback.winner.provider $selectionResult.slots.fallback.winner.modelId)`""
-    "NIM_ENABLE_THINKING=" = "NIM_ENABLE_THINKING=$isThinking"
+    "ENABLE_THINKING=" = "ENABLE_THINKING=$isThinking"
 }
 # ... (rest of .env update logic as before)
 ```

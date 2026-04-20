@@ -1,4 +1,4 @@
-# Design Spec: Claude Proxy Auto-Updater v6.0 (The Brain Migration)
+﻿# Design Spec: Claude Proxy Auto-Updater v6.0 (The Brain Migration)
 
 **Status:** Approved  
 **Version:** 6.0  
@@ -70,7 +70,7 @@ The central settings file for the entire application. A `config.example.json` wi
 ## 5. UI Requirements
 Shell scripts will remain responsible for:
 - Printing the colorful tables (Model Selection & Score Breakdown).
-- Updating the `.env` file keys: `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, `MODEL`, `NIM_ENABLE_THINKING`.
+- Updating the `.env` file keys: `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, `MODEL`, `ENABLE_THINKING`.
 
 ## 6. Success Criteria
 - v6.0 produces identical selections on Windows and Linux for the same cache/config data.
