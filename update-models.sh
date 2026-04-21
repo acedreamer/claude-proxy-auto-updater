@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env bash
 #
-# Claude Proxy Auto-Updater v6.2 - Bash Edition
+# Claude Proxy Auto-Updater v6.2.1 - Bash Edition
 # acedreamer/claude-proxy-auto-updater
 #
 # UX Polish & Centralized Brain (v6.1+)

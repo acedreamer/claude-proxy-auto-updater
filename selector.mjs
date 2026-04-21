@@ -51,6 +51,11 @@ export async function readConfig(configPath) {
   return config;
 }
 
+export function isThinkingModel(modelId) {
+  const patterns = [/deepseek-r1/i, /kimi-k2-thinking/i, /qwq/i, /-thinking$/i, /\b(thinking|r1)\b/i, /thinking-model/i, /reasoning/i];
+  return patterns.some(p => p.test(modelId));
+}
+
 export function getModelTier(modelId) {
   const m = modelId.toLowerCase();
   if (m.includes('flash') || m.includes('lite') || m.includes('tiny') || m.includes('-8b') || m.includes('mini')) return 'utility';

@@ -1,7 +1,7 @@
 # Model Selector Overhaul: Intelligent Slot-Role Intelligence
 
 **Date:** April 21, 2026
-**Target:** `claude-proxy-auto-updater` v6.2
+**Target:** `claude-proxy-auto-updater` v6.2.1
 **Goal:** Transition from "Benchmark Chasing" to "UX-First Engineering."
 
 ---

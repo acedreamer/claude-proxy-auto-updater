@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
-#  Claude Proxy Auto-Updater  v6.1
+#  Claude Proxy Auto-Updater  v6.2.1
 #  acedreamer/claude-proxy-auto-updater
 #
 #  UX Polish & Centralized Brain (v6.0+)
