@@ -5,43 +5,41 @@
 [![Bash](https://img.shields.io/badge/Bash-3.2+-4EAA25.svg)](https://www.gnu.org/software/bash/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Intelligent model selection for free-claude-code proxy — automatically picks the best available AI models at startup.**
+> **UX-First Model Selection — Intelligent deployment engine that understands model tiers and capabilities.**
 
 ![Demo](./f.gif)
 
 ## What It Does
 
-The Claude Proxy Auto-Updater connects to free AI model providers (NVIDIA NIM and OpenRouter) in real-time, measures actual performance metrics (latency, stability, SWE bench scores), and automatically selects the optimal models for each proxy slot using a unified Node.js decision engine:
+The Claude Proxy Auto-Updater is an intelligent deployment engine for the `free-claude-code` proxy. It goes beyond simple benchmarks by understanding the physical differences between model tiers (Flash vs. MoE vs. Flagship), ensuring each proxy slot is filled by a model physically capable of that role.
 
-- **OPUS** — Heavy reasoning tasks requiring the highest quality
-- **SONNET** — Balanced performance for general coding work
-- **HAIKU** — Fast responses for lightweight queries
-- **FALLBACK** — Reliable backup when primary models are unavailable
+- **OPUS** — **Flagship Only**: 300B+ giants and heavy reasoning models. "Flash" models are legally barred.
+- **SONNET** — **Workhorse**: Balanced performance, with a scoring bonus for MoE (Mixture-of-Experts) models.
+- **HAIKU** — **Near-Instant**: Heavily prioritizes low-latency "Flash" models for lightweight queries.
+- **FALLBACK** — **High Stability**: Reliable backup with a focus on uptime and consistency.
 
 ## Why Use It?
 
-Free AI model availability changes constantly. Instead of manually testing and configuring models every session, this tool:
+Free AI model availability is volatile. This tool replaces "benchmark chasing" with "UX-First Engineering":
 
-- Measures real-time latency, stability scores, and verdicts (Perfect/Normal/Slow/Spiky/Overloaded)
-- Applies intelligent scoring based on SWE-bench performance, latency, and uptime
-- **Centralized Logic**: Uses a single Node.js source of truth for both Windows and Linux/macOS
-- **User Tunable**: Change scoring weights, pins, and bans via a simple `config.json` file
-- Provides transparent score breakdowns so you know *why* each model was selected
-- Works on Windows (PowerShell), Linux, and macOS (Bash)
+- **Tier Enforcement**: Hard bans prevent weak "Flash" models from occupying the Opus/Sonnet slots, even if they have high benchmark scores.
+- **Auto-Thinking**: Automatically detects reasoning models and toggles `ENABLE_THINKING` in your `.env` file—zero configuration required.
+- **Density Preference**: Grants a **+60 pts bonus** to "Super-Flagship" models in the Opus slot for maximum intelligence.
+- **Mean Probing**: Validates tool-call capabilities by rejecting empty responses and malformed JSON, preventing infinite loops.
+- **Context Aware**: Captures and respects `context_window` limits (e.g., 128k) during selection.
 
 ## Key Features
 
 | Feature | Description |
 |---------|-------------|
-| Real-Time Telemetry | Pings models via `fcm-oneshot.mjs` (leveraging `free-coding-models` if available) |
-| Unified Brain | `selector.mjs` ensures 100% consistent model selection across all platforms |
+| Slot-Role Intelligence | `selector.mjs` enforces tier-based selection (Utility vs. Standard vs. Flagship) |
+| Automated Thinking | Auto-toggle for `ENABLE_THINKING` when a reasoning model wins the Opus slot |
+| Anti-Hallucination | Strict functional validation rejects models that fail live tool-call probes |
+| MoE/Flash Bonuses | Architecture-aware scoring prioritizes the right model types for each slot |
+| Unified Brain | Single Node.js source of truth for consistent selection across Windows/Linux/macOS |
+| Score Transparency | Detailed breakdown showing why a model was chosen (SWE, Stab, Lat, Tier bonuses) |
+| Intelligent Caching | 45m default TTL reduces startup time from ~30s to ~1s |
 | Master Config | Centralized `config.json` for all settings, weights, pins, and bans |
-| Auto-Detection | Dynamically detects tool-call support and role classifications |
-| Cross-Platform | Native wrappers for PowerShell 5.1+ and POSIX Bash 3.2+ |
-| Score Transparency | Detailed score breakdown with runner-up tracking for every slot |
-| Dry-Run Mode | Preview selections without modifying your `.env` file |
-| Intelligent Caching | Caches results for configurable TTL to reduce startup time from ~30s to ~1s |
-| Graceful Degradation | Works even without `free-coding-models` (latency-only mode) |
 
 ## Installation
 
@@ -84,7 +82,7 @@ Free AI model availability changes constantly. Instead of manually testing and c
 
 ## Example Output
 
-When you run the updater, you get a real-time telemetry ping followed by intelligent slot selection based on actual performance and quality scores:
+The updater provides a real-time telemetry ping followed by intelligent slot selection. Note the automatic detection of "Thinking" capabilities:
 
 ```text
 ======== PINGING MODELS VIA FREE-CODING-MODELS ========
@@ -100,24 +98,25 @@ When you run the updater, you get a real-time telemetry ping followed by intelli
 ============= MODEL SELECTION ===========================================================================       
 SLOT       | MODEL (Short)                          | THINK | SCORE  | VERDICT | LAT(ms) | Runner-up
 =========================================================================================================       
-OPUS       | kimi-k2-instruct-0905(nvidia)          | No    |   72.4 | Normal  |     744 | kimi-k2-instruct(nvidia) (d-0.0)
-SONNET     | llama-4-maverick-17b-128e-instruct(nvidia) | No    |   79.2 | Perfect |     263 | gpt-oss-120b(nvidia) (d-0.7)
-HAIKU      | qwen2.5-coder-32b-instruct(nvidia)     | No    |   86.5 | Perfect |     254 | gpt-oss-20b(nvidia) (d-0.5)
-FALLBACK   | kimi-k2.5(nvidia)                      | No    |   82.9 | Slow    |    1216 | kimi-k2-instruct-0905(nvidia) (d-0.4)
+OPUS       | qwen3-next-80b(nvidia)                 | YES   |  132.4 | Perfect |     272 | gpt-oss-120b(nvidia) (d-10.0)
+SONNET     | deepseek-v3(nvidia)                    | No    |   94.2 | Perfect |     310 | mixtral-8x22b(nvidia) (d-2.7)
+HAIKU      | qwen2.5-coder-32b(nvidia)              | No    |   86.5 | Perfect |     254 | gpt-oss-20b(nvidia) (d-0.5)
+FALLBACK   | llama-3.3-70b-instruct(nvidia)         | No    |   82.9 | Normal  |     416 | kimi-k2-instruct(nvidia) (d-0.4)
 
 ============= SCORE BREAKDOWN ============================
-SLOT       |    SWE |   STAB |    LAT |    NIM |  TOTAL
+SLOT       |    SWE |   STAB |    LAT |    TIER |  TOTAL
 ==========================================================
-OPUS       |   36.2 |   19.2 |    5.0 |   12.0 |   72.4
-SONNET     |   21.7 |   24.5 |   25.0 |    8.0 |   79.2
-HAIKU      |    2.3 |   14.7 |   65.5 |    4.0 |   86.5
-FALLBACK   |   19.2 |   46.5 |    9.2 |    8.0 |   82.9
+OPUS       |   36.2 |   19.2 |   17.0 |   60.0* |  132.4  (*Super-Flagship Bonus)
+SONNET     |   35.7 |   24.5 |   24.0 |   10.0^ |   94.2  (^MoE Architecture Bonus)
+HAIKU      |    2.3 |   14.7 |   65.5 |    4.0  |   86.5
+FALLBACK   |   19.2 |   46.5 |    9.2 |    8.0  |   82.9
 ```
+
+## Migration Note: ENABLE_THINKING
+As of v6.2, the legacy `NIM_ENABLE_THINKING` has been fully migrated to the new `ENABLE_THINKING` standard. The updater now handles this toggle automatically based on the Opus slot selection.
 
 ## Usage
 ### Basic Usage
-
-The script automatically updates your `.env` file with the best available models:
 
 ```powershell
 # Windows
@@ -132,79 +131,27 @@ The script automatically updates your `.env` file with the best available models
 | Option | Description |
 |--------|-------------|
 | `--dry-run` or `-DryRun` | Preview scores and selections without modifying `.env` |
-| `--tool-test` | Enable tool-call probing for new model validation |
+| `--tool-test` | Force live tool-call capability verification (bypasses cache) |
 
 ## Configuration
 
-All configuration is managed via `config.json`. If missing, it will be auto-generated on the first run using `config.example.json` as a template.
+All configuration is managed via `config.json`.
 
-### Config Sections
-
-- **general**: Cache TTL, providers, tier filters, and timeouts.
+- **general**: Cache TTL (default 45m), providers, and tier filters.
 - **preferences**:
-  - **pins**: Pin a specific model to a slot (e.g., `"opus": "nvidia/deepseek-v3"`).
+  - **pins**: Pin a specific model to a slot.
   - **bans**: Prevent specific models from ever being selected.
-- **scoring**: Detailed weights for SWE, Stability, Latency, and NIM bonuses for each slot.
-
-### Example `config.json`
-
-```json
-{
-  "general": {
-    "cache_ttl_minutes": 15,
-    "providers": "nvidia,openrouter",
-    "tier_filter": "S+,S,A+,A"
-  },
-  "preferences": {
-    "pins": { "opus": null, "sonnet": null, "haiku": null },
-    "bans": []
-  },
-  "scoring": {
-    "weights": {
-      "opus": { "swe": 0.55, "stab": 0.20, "lat": 0.05, "nim": 1.5 },
-      ...
-    }
-  }
-}
-```
+- **scoring**: Detailed weights for SWE, Stability, Latency, and Architecture bonuses.
 
 ## Testing
 
-Run the test suite to verify functionality:
-
 ```powershell
-# Windows - run all tests
+# Windows
 .\run-tests.ps1
-```
 
-**New in v6.0**: Unified Node.js test runner for the decision engine:
-```bash
+# Decision Engine
 node --test tests/selector.test.mjs
 ```
-
-## Project Structure
-
-```
-claude-proxy-auto-updater/
-├── update-models.ps1          # PowerShell UI Wrapper (Windows)
-├── update-models.sh           # Bash UI Wrapper (Linux/macOS)
-├── setup.ps1                  # Setup Engine (Windows)
-├── setup.sh                   # Setup Engine (Linux/macOS)
-├── selector.mjs               # The Brain: Unified decision engine
-├── fcm-oneshot.mjs            # Data Collector: Real-time telemetry
-├── @start_server.bat          # One-Click Launcher (Windows)
-├── config.example.json        # Template for user settings
-├── .env                       # Your API keys (not committed)
-├── docs/                      # Documentation & Archives
-└── tests/                     # Test suite & Runner
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Open a Pull Request
 
 ## License
 

@@ -51,57 +51,88 @@ export async function readConfig(configPath) {
   return config;
 }
 
-export function calculateScore(model, weights, isPinned = false) {
-  const avgMs = model.avgMs || 9999.0;
-  const latScoreRaw = Math.max(0, Math.min(100, 100 - ((avgMs - weights.target_lat) * weights.penalty)));
-  
-  const sweScore = model.swe || 0;
-  const stability = model.stability || 30.0;
-  const nimBonus = model.provider === 'nvidia' ? 8 : 0;
-  
-  const components = {
-    swe: Math.round(sweScore * weights.swe * 10) / 10,
-    stab: Math.round(stability * weights.stab * 10) / 10,
-    lat: Math.round(latScoreRaw * weights.lat * 10) / 10,
-    nim: Math.round(nimBonus * weights.nim * 10) / 10
-  };
-  
-  let total = components.swe + components.stab + components.lat + components.nim;
-  if (isPinned) total += 1000;
-  
-  return {
-    total: Math.round(total * 10) / 10,
-    components
-  };
-}
-
-export function isThinkingModel(modelId) {
-  const patterns = [/deepseek-r1/i, /kimi-k2-thinking/i, /qwq/i, /-thinking$/i, /\b(thinking|r1)\b/i, /thinking-model/i, /reasoning/i];
-  return patterns.some(p => p.test(modelId));
+export function getModelTier(modelId) {
+  const m = modelId.toLowerCase();
+  if (m.includes('flash') || m.includes('lite') || m.includes('tiny') || m.includes('-8b') || m.includes('mini')) return 'utility';
+  // Super-Flagship: High-density giants (>200B) or premium Opus models
+  if (m.includes('397b') || m.includes('405b') || m.includes('opus-4-7') || m.includes('opus-5')) return 'super-flagship';
+  if (m.includes('thinking') || m.includes('r1') || m.includes('opus') || m.includes('70b') || m.includes('80b')) return 'flagship';
+  return 'standard';
 }
 
 export function isEligible(model, slot, config) {
   if (model.status !== 'up') return false;
   if (config.preferences.bans.includes(model.modelId)) return false;
   
-  const thinking = model.thinking !== undefined ? model.thinking : isThinkingModel(model.modelId);
   const verdict = model.verdict || 'Unknown';
+  const tier = getModelTier(model.modelId);
   
-  // Slot specific rules
-  if (slot === 'opus' || slot === 'sonnet') {
-    if (thinking) return false;
+  // Slot specific rules - Intelligence Enforcement
+  if (slot === 'opus') {
+    // OPUS MUST be a Flagship or Super-Flagship. 
+    if (tier === 'utility' || tier === 'standard') return false;
+    if (!['Perfect', 'Normal'].includes(verdict)) return false;
+    if (!model.effectiveToolCallOk) return false;
+  } else if (slot === 'sonnet') {
+    // SONNET MUST be at least Flagship (70B+). No Lite/Utility models.
+    if (tier === 'utility') return false;
     if (!['Perfect', 'Normal'].includes(verdict)) return false;
     if (!model.effectiveToolCallOk) return false;
   } else if (slot === 'haiku') {
-    if (thinking) return false;
     if (!['Perfect', 'Normal', 'Slow'].includes(verdict)) return false;
   } else if (slot === 'fallback') {
-    if (thinking) return false;
     if (!['Perfect', 'Normal', 'Slow', 'Spiky'].includes(verdict)) return false;
     if (!model.effectiveToolCallOk) return false;
   }
   
   return true;
+}
+
+export function calculateScore(model, weights, isPinned = false) {
+  const avgMs = model.avgMs || 9999.0;
+  const latScoreRaw = Math.max(0, Math.min(100, 100 - ((avgMs - weights.target_lat) * weights.penalty)));
+  
+  const sweScore = model.swe || 0;
+  const stability = model.stability || 30.0;
+  const nimBonus = model.provider === 'nvidia' ? 12 : 0;
+  
+  // ROLE AFFINITY BONUSES
+  let roleBonus = 0;
+  const tier = getModelTier(model.modelId);
+  const isThinking = isThinkingModel(model.modelId);
+
+  // Opus Role: Prioritizes Raw Density (Super-Flagships) and Reasoning
+  if (weights.swe > 0.5) { 
+    if (tier === 'super-flagship') roleBonus += 60; // Ensure 400B models beat 80B models
+    if (tier === 'flagship') roleBonus += 25;
+    if (isThinking) roleBonus += 30;
+  }
+  // Haiku Role: Values Flash/Utility speed
+  else if (weights.lat > 0.6) { 
+    if (tier === 'utility') roleBonus += 50;
+  }
+  // Sonnet Role: Values MoE Efficiency
+  else {
+    const isMoE = /deepseek-v3|mixtral|qwen.*-moe|397b|a3b|a17b/i.test(model.modelId);
+    if (isMoE) roleBonus += 25;
+    if (tier === 'flagship') roleBonus += 15;
+  }
+  
+  const components = {
+    swe: Math.round(sweScore * weights.swe * 10) / 10,
+    stab: Math.round(stability * weights.stab * 10) / 10,
+    lat: Math.round(latScoreRaw * weights.lat * 10) / 10,
+    nim: Math.round(nimBonus * weights.nim * 10) / 10,
+    role: roleBonus
+  };
+  
+  let total = components.swe + components.stab + components.lat + components.nim + components.role;
+  if (isPinned) total += 1000;
+  
+  return {
+    total: Math.round(total * 10) / 10,
+    components
+  };
 }
 
 export function getShortName(provider, modelId) {

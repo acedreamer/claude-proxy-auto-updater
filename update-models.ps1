@@ -1,8 +1,8 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
-#  Claude Proxy Auto-Updater  v6.2
+#  Claude Proxy Auto-Updater  v6.1
 #  acedreamer/claude-proxy-auto-updater
 #
 #  UX Polish & Centralized Brain (v6.0+)
@@ -303,10 +303,10 @@ if ($MyInvocation.InvocationName -ne '.') {
         function Get-Pref { param($s) return Get-ModelPrefix $selectionResult.slots.$s.winner.provider $selectionResult.slots.$s.winner.modelId }
 
         $mappings = @{
-            "MODEL_OPUS="          = "MODEL_OPUS=`"$(Get-Pref opus)`""
-            "MODEL_SONNET="        = "MODEL_SONNET=`"$(Get-Pref sonnet)`""
-            "MODEL_HAIKU="         = "MODEL_HAIKU=`"$(Get-Pref haiku)`""
-            "MODEL="               = "MODEL=`"$(Get-Pref fallback)`""
+            "MODEL_OPUS="      = "MODEL_OPUS=`"$(Get-Pref opus)`""
+            "MODEL_SONNET="    = "MODEL_SONNET=`"$(Get-Pref sonnet)`""
+            "MODEL_HAIKU="     = "MODEL_HAIKU=`"$(Get-Pref haiku)`""
+            "MODEL="           = "MODEL=`"$(Get-Pref fallback)`""
             "ENABLE_THINKING=" = "ENABLE_THINKING=$isThinking"
         }
 

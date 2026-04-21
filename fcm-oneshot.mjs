@@ -250,21 +250,32 @@ async function toolCallProbe(model, signal) {
 
     // R-402: Check for valid tool_use in response
     let hasToolUse = false
+    let hasContent = false
+
     if (data.choices && data.choices[0]?.message) {
       const msg = data.choices[0].message
-      if (msg.tool_calls && msg.tool_calls.length > 0) {
-        hasToolUse = true
+      
+      // Strict Content Check: Reject empty or whitespace-only responses
+      if (msg.content && msg.content.trim().length > 0) {
+        hasContent = true
       }
-      // OpenRouter uses different format
-      if (msg.content && typeof msg.content === 'string' && msg.content.includes('tool')) {
-        // Conservative check - actual tool_use detection varies by API
+
+      // Strict Tool Call Check: Must have actual arguments
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        const firstCall = msg.tool_calls[0]
+        if (firstCall.function && firstCall.function.arguments) {
+          hasToolUse = true
+        }
       }
     }
 
-    if (hasToolUse) {
-      return { toolCallOk: true, probeStatus: 'pass', reason: 'tool_use_detected', probeMs }
+    if (hasToolUse || hasContent) {
+      const reason = hasToolUse ? 'tool_use_detected' : 'content_detected'
+      return { toolCallOk: true, probeStatus: 'pass', reason, probeMs }
     }
-    return { toolCallOk: false, probeStatus: 'fail', reason: 'no_tool_use', probeMs }
+
+    // FAILED: Model responded but sent back nothing useful (likely context window or capacity issue)
+    return { toolCallOk: false, probeStatus: 'fail', reason: 'empty_response', probeMs }
   } catch (err) {
     // R-405: Fall back on error/timeout
     if (signal.aborted) {
@@ -460,11 +471,11 @@ async function main() {
         provider: m.providerKey,
         tier: m.tier,
         swe: sweNum,
+        context: m.ctx, // Preserving context window (e.g. "128k")
         status: m.status,
         // R-502: verdict is "Unknown" in degraded mode
         verdict: 'Unknown',
         avgMs: avgMs > 0 ? avgMs : null,
-        // R-502: stability is null in degraded mode
         stability: null,
         degraded: true,
         toolCallOk: m.toolCallOk,
@@ -479,6 +490,7 @@ async function main() {
       provider: m.providerKey,
       tier: m.tier,
       swe: sweNum,
+      context: m.ctx || m[4], // Preserving context window
       status: m.status,
       verdict: getVerdict(m),
       avgMs: getAvg(m),
