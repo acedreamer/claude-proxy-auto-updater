@@ -7,6 +7,9 @@
 # Logs
 *.log
 
+# Test artifacts
+test-results.xml
+
 # Cache files
 *.cache
 model-cache.json

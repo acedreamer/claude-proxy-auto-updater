@@ -52,11 +52,13 @@ export async function readConfig(configPath) {
 }
 
 export function isThinkingModel(modelId) {
+  if (!modelId) return false;
   const patterns = [/deepseek-r1/i, /kimi-k2-thinking/i, /qwq/i, /-thinking$/i, /\b(thinking|r1)\b/i, /thinking-model/i, /reasoning/i];
   return patterns.some(p => p.test(modelId));
 }
 
 export function getModelTier(modelId) {
+  if (!modelId) return 'standard';
   const m = modelId.toLowerCase();
   if (m.includes('flash') || m.includes('lite') || m.includes('tiny') || m.includes('-8b') || m.includes('mini')) return 'utility';
   // Super-Flagship: High-density giants (>200B) or premium Opus models
@@ -67,7 +69,7 @@ export function getModelTier(modelId) {
 
 export function isEligible(model, slot, config) {
   if (model.status !== 'up') return false;
-  if (config.preferences.bans.includes(model.modelId)) return false;
+  if (config?.preferences?.bans && config.preferences.bans.includes(model.modelId)) return false;
   
   const verdict = model.verdict || 'Unknown';
   const tier = getModelTier(model.modelId);
@@ -118,7 +120,7 @@ export function calculateScore(model, weights, isPinned = false) {
   }
   // Sonnet Role: Values MoE Efficiency
   else {
-    const isMoE = /deepseek-v3|mixtral|qwen.*-moe|397b|a3b|a17b/i.test(model.modelId);
+    const isMoE = /deepseek-v3|mixtral|qwen.*-moe|397b|a3b|a17b/i.test(model.modelId || '');
     if (isMoE) roleBonus += 25;
     if (tier === 'flagship') roleBonus += 15;
   }
@@ -233,17 +235,37 @@ function mergeDeep(target, source) {
   return target;
 }
 
+// Built-in sample models for canary verification / dry-run when cache is missing
+export const SAMPLE_MODELS = [
+  { modelId: 'meta/llama-3.1-405b-instruct', provider: 'nvidia', tier: 'S', swe: 68.2, status: 'up', verdict: 'Perfect', avgMs: 420, stability: 98, effectiveToolCallOk: true, toolCallProbeStatus: 'pass' },
+  { modelId: 'deepseek-ai/deepseek-v3.2', provider: 'nvidia', tier: 'S', swe: 68.3, status: 'up', verdict: 'Perfect', avgMs: 310, stability: 96, effectiveToolCallOk: true, toolCallProbeStatus: 'pass' },
+  { modelId: 'moonshotai/kimi-k2-instruct-0905', provider: 'nvidia', tier: 'S', swe: 70.9, status: 'up', verdict: 'Normal', avgMs: 744, stability: 95, effectiveToolCallOk: true, toolCallProbeStatus: 'pass' },
+  { modelId: 'qwen/qwen2.5-coder-32b-instruct', provider: 'nvidia', tier: 'S', swe: 65.5, status: 'up', verdict: 'Perfect', avgMs: 254, stability: 97, effectiveToolCallOk: true, toolCallProbeStatus: 'pass' },
+  { modelId: 'deepseek/deepseek-r1:free', provider: 'openrouter', tier: 'S', swe: 68.5, status: 'up', verdict: 'Perfect', avgMs: 850, stability: 92, effectiveToolCallOk: true, toolCallProbeStatus: 'pass' }
+];
+
 // Main execution
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const isDryRun = args.includes('--dry-run');
+  const isNoPing = args.includes('--no-ping');
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const cachePath = path.resolve(scriptDir, 'model-cache.json');
   const configPath = path.resolve(scriptDir, 'config.json');
 
   try {
-    const cacheData = await fs.readFile(cachePath, 'utf8');
-    const models = JSON.parse(stripBOM(cacheData));
+    let models;
+    try {
+      const cacheData = await fs.readFile(cachePath, 'utf8');
+      models = JSON.parse(stripBOM(cacheData));
+    } catch (err) {
+      if ((isNoPing || isDryRun) && err.code === 'ENOENT') {
+        models = SAMPLE_MODELS;
+      } else {
+        throw err;
+      }
+    }
     const config = await readConfig(configPath);
-
     const result = assignSlots(models, config);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } catch (err) {

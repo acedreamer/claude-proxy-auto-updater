@@ -1,11 +1,12 @@
 ﻿# Claude Proxy Auto-Updater
 
 [![Version](https://img.shields.io/badge/version-6.2.1-blue.svg)](https://github.com/acedreamer/claude-proxy-auto-updater)
+[![CI](https://github.com/acedreamer/claude-proxy-auto-updater/actions/workflows/ci.yml/badge.svg)](https://github.com/acedreamer/claude-proxy-auto-updater/actions/workflows/ci.yml)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE.svg)](https://docs.microsoft.com/powershell/)
 [![Bash](https://img.shields.io/badge/Bash-3.2+-4EAA25.svg)](https://www.gnu.org/software/bash/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **UX-First Model Selection — Intelligent deployment engine that understands model tiers and capabilities.**
+> **Capability-Aware LLM Router & Live Canary Probing Engine** — Deterministic model selection, live tool-call JSON validation, and latency-weighted slot routing across volatile inference providers (NVIDIA NIM, OpenRouter) for `free-claude-code` and OpenAI-compatible proxies.
 
 ![Demo](./f.gif)
 
@@ -17,6 +18,27 @@ The Claude Proxy Auto-Updater is an intelligent deployment engine for the `free-
 - **SONNET** — **Workhorse**: Balanced performance, with a scoring bonus for MoE (Mixture-of-Experts) models.
 - **HAIKU** — **Near-Instant**: Heavily prioritizes low-latency "Flash" models for lightweight queries.
 - **FALLBACK** — **High Stability**: Reliable backup with a focus on uptime and consistency.
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    A["Startup Trigger<br/>(@start_server.bat / update-models.ps1 / update-models.sh)"] --> B{"45-Minute TTL Cache Check<br/>(model-cache.json)"}
+    
+    B -->|"Cache Hit (~1s)"| E["selector.mjs<br/>Multi-Factor Scoring Engine"]
+    B -->|"Cache Miss (~30s)"| C["fcm-oneshot.mjs<br/>Live Canary Probing Engine"]
+    
+    C --> D["Live Canary Probing<br/>- Pings NVIDIA NIM & OpenRouter endpoints<br/>- Validates functional tool-call JSON output<br/>- Disqualifies empty & looping responses<br/>- Records TTFT, latency & context window"]
+    D -->|"Save Telemetry"| B2[("model-cache.json")]
+    B2 --> E
+    
+    E --> F["Multi-Factor Scoring Matrix<br/>- SWE Score (38%) & Stability (20%)<br/>- Latency (17%) & Context Window (10%) & Ping (15%)<br/>- +60 Super-Flagship bonus (300B+/Reasoning on OPUS)<br/>- +10 MoE architecture bonus (Sonnet workhorse)<br/>- Hard-bans utility/flash models from OPUS slot"]
+    
+    F --> G["Slot Assignment & State Sync<br/>- OPUS: Flagship / Super-Flagship<br/>- SONNET: Workhorse MoE<br/>- HAIKU: Low-latency Utility<br/>- FALLBACK: High-stability Anchor<br/>- Auto-detects Reasoning & toggles ENABLE_THINKING"]
+    
+    G --> H[".env Injection<br/>(MODEL_OPUS, MODEL_SONNET, MODEL_HAIKU, MODEL, ENABLE_THINKING)"]
+    H --> I["Launch Proxy Server (free-claude-code)"]
+```
 
 ## Why Use It?
 
@@ -32,7 +54,7 @@ Free AI model availability is volatile. This tool replaces "benchmark chasing" w
 
 | Feature | Description |
 |---------|-------------|
-| Slot-Role Intelligence | `selector.mjs` enforces tier-based selection (Utility vs. Standard vs. Flagship) |
+| Slot-Role Intelligence | `selector.mjs` enforces tier-based selection (Utility vs. Standard vs. Flagship). See [docs/MODEL_SELECTOR_OVERHAUL.md](docs/MODEL_SELECTOR_OVERHAUL.md). |
 | Automated Thinking | Auto-toggle for `ENABLE_THINKING` when a reasoning model wins the Opus slot |
 | Anti-Hallucination | Strict functional validation rejects models that fail live tool-call probes |
 | MoE/Flash Bonuses | Architecture-aware scoring prioritizes the right model types for each slot |
@@ -47,7 +69,7 @@ Free AI model availability is volatile. This tool replaces "benchmark chasing" w
 
 - **Windows**: PowerShell 5.1 or later (included in Windows 10+)
 - **Linux/macOS**: Bash 3.2 or later
-- **Node.js**: 16+ (required for `fcm-oneshot.mjs` and `selector.mjs`)
+- **Node.js**: 18+ (required for `fcm-oneshot.mjs` and `selector.mjs`)
 
 ### Quick Start
 
@@ -113,7 +135,7 @@ FALLBACK   |   19.2 |   46.5 |    9.2 |    8.0  |   82.9
 ```
 
 ## Migration Note: ENABLE_THINKING
-As of v6.2.1, the legacy `NIM_ENABLE_THINKING` has been fully migrated to the new `ENABLE_THINKING` standard. The updater now handles this toggle automatically based on the Opus slot selection.
+As of v6.2.1, the legacy `NIM_ENABLE_THINKING` has been fully migrated to the new `ENABLE_THINKING` standard. The updater now handles this toggle automatically based on the Opus slot selection. Detailed in [docs/MODEL_SELECTOR_OVERHAUL.md](docs/MODEL_SELECTOR_OVERHAUL.md).
 
 ## Usage
 ### Basic Usage
@@ -124,6 +146,21 @@ As of v6.2.1, the legacy `NIM_ENABLE_THINKING` has been fully migrated to the ne
 
 # Linux/macOS
 ./update-models.sh
+```
+
+### CLI & Node.js Scripts
+
+```bash
+# Preview scoring and slot selection (dry run)
+npm run select:dry
+# or
+node selector.mjs --dry-run
+
+# Run full selection engine
+npm run select
+
+# Trigger canary telemetry probe
+npm run probe
 ```
 
 ### Command-Line Options
@@ -145,12 +182,23 @@ All configuration is managed via `config.json`.
 
 ## Testing
 
-```powershell
-# Windows
-.\run-tests.ps1
+Run the zero-dependency test suite using the Node.js native test runner:
 
-# Decision Engine
-node --test tests/selector.test.mjs
+```bash
+# Native Node.js test runner via npm
+npm test
+
+# Direct runner execution
+node --test tests/unit/selector.test.mjs
+
+# Dry run canary validation
+node selector.mjs --dry-run --no-ping
+```
+
+For platform-specific harness tests:
+```powershell
+# Windows PowerShell & Pester
+.\tests\run-all.ps1
 ```
 
 ## License
@@ -160,4 +208,3 @@ MIT License. See [LICENSE](LICENSE) for details.
 ---
 
 **Maintained by:** [@acedreamer](https://github.com/acedreamer)
-

@@ -1,0 +1,16 @@
+{
+  "name": "claude-proxy-auto-updater",
+  "version": "6.2.1",
+  "description": "Capability-aware LLM router, live canary prober, and multi-provider fallback engine for NVIDIA NIM and OpenRouter",
+  "type": "module",
+  "scripts": {
+    "select": "node selector.mjs",
+    "select:dry": "node selector.mjs --dry-run",
+    "probe": "node fcm-oneshot.mjs",
+    "test": "node --test tests/unit/selector.test.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
