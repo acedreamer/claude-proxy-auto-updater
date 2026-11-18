@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 250" width="100%" height="100%">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#58a6ff" />
+    </marker>
+    <filter id="glow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="880" height="250" rx="14" fill="#0d1117" stroke="#30363d" stroke-width="1.5" />
+
+  <!-- Connecting Arrows -->
+  <line x1="209" y1="125" x2="233" y2="125" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="434" y1="125" x2="458" y2="125" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="659" y1="125" x2="683" y2="125" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- Card 1: Trigger & Cache -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, monospace" filter="url(#glow)">
+    <rect x="24" y="35" width="185" height="180" rx="10" fill="#161b22" stroke="#388bfd" stroke-width="1.5" />
+    <text x="40" y="64" fill="#58a6ff" font-size="11" font-weight="700" letter-spacing="0.5">01 · TRIGGER &amp; CACHE</text>
+    <text x="40" y="90" fill="#f0f6fc" font-size="14" font-weight="600">45m TTL Guard</text>
+    <line x1="40" y1="102" x2="193" y2="102" stroke="#30363d" stroke-width="1" />
+    <text x="40" y="126" fill="#8b949e" font-size="11.5">• Checks model-RightNow.json</text>
+    <text x="40" y="150" fill="#8b949e" font-size="11.5">• Cache Hit: ~1s fast boot</text>
+    <text x="40" y="174" fill="#8b949e" font-size="11.5">• Cache Miss: triggers probe</text>
+  </g>
+
+  <!-- Card 2: Canary Prober -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, monospace" filter="url(#glow)">
+    <rect x="239" y="35" width="195" height="180" rx="10" fill="#161b22" stroke="#a371f7" stroke-width="1.5" />
+    <text x="255" y="64" fill="#d2a8ff" font-size="11" font-weight="700" letter-spacing="0.5">02 · CANARY PROBER</text>
+    <text x="255" y="90" fill="#f0f6fc" font-size="14" font-weight="600">fcm-oneshot.mjs</text>
+    <line x1="255" y1="102" x2="418" y2="102" stroke="#30363d" stroke-width="1" />
+    <text x="255" y="124" fill="#8b949e" font-size="11.5">• Pings NIM &amp; OpenRouter</text>
+    <text x="255" y="146" fill="#8b949e" font-size="11.5">• Validates tool-call JSON</text>
+    <text x="255" y="168" fill="#8b949e" font-size="11.5">• Rejects empty/looping LLM</text>
+    <text x="255" y="190" fill="#8b949e" font-size="11.5">• Measures live TTFT latency</text>
+  </g>
+
+  <!-- Card 3: Scoring Engine -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, monospace" filter="url(#glow)">
+    <rect x="464" y="35" width="195" height="180" rx="10" fill="#161b22" stroke="#3fb950" stroke-width="1.5" />
+    <text x="480" y="64" fill="#56d364" font-size="11" font-weight="700" letter-spacing="0.5">03 · SCORING ENGINE</text>
+    <text x="480" y="90" fill="#f0f6fc" font-size="14" font-weight="600">selector.mjs</text>
+    <line x1="480" y1="102" x2="643" y2="102" stroke="#30363d" stroke-width="1" />
+    <text x="480" y="124" fill="#8b949e" font-size="11.5">• 38% SWE · 20% Stability</text>
+    <text x="480" y="146" fill="#8b949e" font-size="11.5">• 17% Latency · 15% Ping</text>
+    <text x="480" y="168" fill="#8b949e" font-size="11.5">• +60 Flagship / +10 MoE</text>
+    <text x="480" y="190" fill="#8b949e" font-size="11.5">• Hard-bans Flash on OPUS</text>
+  </g>
+
+  <!-- Card 4: Slot Router -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, monospace" filter="url(#glow)">
+    <rect x="689" y="35" width="167" height="180" rx="10" fill="#161b22" stroke="#d29922" stroke-width="1.5" />
+    <text x="705" y="64" fill="#e3b341" font-size="11" font-weight="700" letter-spacing="0.5">04 · SLOT ROUTER</text>
+    <text x="705" y="90" fill="#f0f6fc" font-size="14" font-weight="600">.env Injection</text>
+    <line x1="705" y1="102" x2="840" y2="102" stroke="#30363d" stroke-width="1" />
+    <text x="705" y="124" fill="#8b949e" font-size="11.5">• OPUS / SONNET / HAIKU</text>
+    <text x="705" y="146" fill="#8b949e" font-size="11.5">• Auto-FALLBACK slot</text>
+    <text x="705" y="168" fill="#8b949e" font-size="11.5">• Toggles ENABLE_THINKING</text>
+    <text x="705" y="190" fill="#8b949e" font-size="11.5">• Launches Claude Proxy</text>
+  </g>
+</svg>

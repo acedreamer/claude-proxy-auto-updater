@@ -21,24 +21,9 @@ The Claude Proxy Auto-Updater is an intelligent deployment engine for the `free-
 
 ## System Architecture
 
-```mermaid
-flowchart TD
-    A["Startup Trigger<br/>(@start_server.bat / update-models.ps1 / update-models.sh)"] --> B{"45-Minute TTL Cache Check<br/>(model-cache.json)"}
-    
-    B -->|"Cache Hit (~1s)"| E["selector.mjs<br/>Multi-Factor Scoring Engine"]
-    B -->|"Cache Miss (~30s)"| C["fcm-oneshot.mjs<br/>Live Canary Probing Engine"]
-    
-    C --> D["Live Canary Probing<br/>- Pings NVIDIA NIM & OpenRouter endpoints<br/>- Validates functional tool-call JSON output<br/>- Disqualifies empty & looping responses<br/>- Records TTFT, latency & context window"]
-    D -->|"Save Telemetry"| B2[("model-cache.json")]
-    B2 --> E
-    
-    E --> F["Multi-Factor Scoring Matrix<br/>- SWE Score (38%) & Stability (20%)<br/>- Latency (17%) & Context Window (10%) & Ping (15%)<br/>- +60 Super-Flagship bonus (300B+/Reasoning on OPUS)<br/>- +10 MoE architecture bonus (Sonnet workhorse)<br/>- Hard-bans utility/flash models from OPUS slot"]
-    
-    F --> G["Slot Assignment & State Sync<br/>- OPUS: Flagship / Super-Flagship<br/>- SONNET: Workhorse MoE<br/>- HAIKU: Low-latency Utility<br/>- FALLBACK: High-stability Anchor<br/>- Auto-detects Reasoning & toggles ENABLE_THINKING"]
-    
-    G --> H[".env Injection<br/>(MODEL_OPUS, MODEL_SONNET, MODEL_HAIKU, MODEL, ENABLE_THINKING)"]
-    H --> I["Launch Proxy Server (free-claude-code)"]
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="Capability-Aware LLM Router Architecture" width="780" />
+</p>
 
 ## Why Use It?
 
