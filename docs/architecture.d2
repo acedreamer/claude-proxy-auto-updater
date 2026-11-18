@@ -1,0 +1,59 @@
+direction: right
+
+zone1: "01 · Trigger & 45m TTL Guard" {
+  start: "CLI Startup\n(start_proxy / setup)"
+  cache: "model-RightNow.json\n(Cached Telemetry)" { shape: cylinder }
+  ttl_gate: "TTL < 45m?" { shape: diamond }
+  start -> cache -> ttl_gate
+}
+
+zone2: "02 · Live Canary Prober (fcm-oneshot.mjs)" {
+  nim: "NVIDIA NIM API\n(Parallel Probe)"
+  openrouter: "OpenRouter API\n(Parallel Probe)"
+  canary_gate: "Valid Tool-Call JSON\n& No Empty/Loop?" { shape: diamond }
+  discard: "Reject Model\n(Drop Candidate)" {
+    style.stroke: "#f85149"
+  }
+  nim -> canary_gate: "TTFT + JSON"
+  openrouter -> canary_gate: "TTFT + JSON"
+  canary_gate -> discard: "FAIL"
+}
+
+zone3: "03 · Multi-Factor Scorer (selector.mjs)" {
+  scorer: "Weighted Scoring Engine\n38% SWE · 20% Stability\n17% Latency · 15% Ping · 10% Ctx"
+  opus: "OPUS Slot\n300B+ (+60 Flagship)\nHard-Ban Flash"
+  sonnet: "SONNET Slot\nWorkhorse (+10 MoE)"
+  haiku: "HAIKU Slot\nLow-Latency Flash"
+  fallback: "FALLBACK Slot\nMax Stability/Uptime"
+
+  scorer -> opus: "Rank #1 Heavy"
+  scorer -> sonnet: "Rank #1 Balanced"
+  scorer -> haiku: "Rank #1 Fast"
+  scorer -> fallback: "Backup"
+}
+
+zone4: "04 · Runtime Injection" {
+  think_gate: "Reasoning Model?" { shape: diamond }
+  think_on: "ENABLE_THINKING=true"
+  think_off: "ENABLE_THINKING=false"
+  env_inject: "Inject .env &\nLaunch Claude Proxy"
+
+  think_gate -> think_on: "YES"
+  think_gate -> think_off: "NO"
+  think_on -> env_inject
+  think_off -> env_inject
+}
+
+zone1.ttl_gate -> zone4.env_inject: "YES · Cache Hit (~1s Fast-Path)" {
+  style.stroke: "#3fb950"
+  style.stroke-dash: 4
+}
+zone1.ttl_gate -> zone2.nim: "NO · Miss (~30s)"
+zone1.ttl_gate -> zone2.openrouter: "NO · Miss"
+zone2.canary_gate -> zone3.scorer: "PASS (Live Metrics)" {
+  style.stroke: "#3fb950"
+}
+zone3.opus -> zone4.think_gate
+zone3.sonnet -> zone4.think_gate
+zone3.haiku -> zone4.env_inject
+zone3.fallback -> zone4.env_inject

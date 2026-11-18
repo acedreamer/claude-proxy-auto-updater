@@ -22,7 +22,7 @@ The Claude Proxy Auto-Updater is an intelligent deployment engine for the `free-
 ## System Architecture
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Capability-Aware LLM Router Architecture" width="780" />
+  <img src="docs/architecture.svg" alt="Capability-Aware LLM Router Architecture" width="840" />
 </p>
 
 ## Why Use It?
